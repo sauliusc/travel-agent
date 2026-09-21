@@ -68,50 +68,47 @@ fi
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements.txt
 
-log "Installing the Anthropic CLI (ant)"
-if ! command -v ant >/dev/null 2>&1; then
-  # Installs from GitHub Releases (github.com/anthropics/anthropic-cli) —
-  # this is the documented Linux install path. A previous version of this
-  # script piped from an unverified cli.anthropic.com URL that turned out
-  # not to resolve; this replaces it with a source we can actually confirm.
-  ANT_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  ANT_ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
-  ANT_TAG="$(curl -fsSL https://api.github.com/repos/anthropics/anthropic-cli/releases/latest \
-    | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"
-  if [ -n "$ANT_TAG" ]; then
-    ANT_VERSION="${ANT_TAG#v}"
-    curl -fsSL "https://github.com/anthropics/anthropic-cli/releases/download/${ANT_TAG}/ant_${ANT_VERSION}_${ANT_OS}_${ANT_ARCH}.tar.gz" \
-      | tar -xz -C /usr/local/bin ant || {
-      echo "ant CLI install failed — you can skip it and set ANTHROPIC_API_KEY instead." >&2
-    }
-  else
-    echo "Could not determine the latest ant CLI release — you can skip it and set ANTHROPIC_API_KEY instead." >&2
-  fi
+log "Installing Claude Code CLI"
+if ! command -v claude >/dev/null 2>&1; then
+  # Official installer per code.claude.com/docs/en/setup.md. Agents in this
+  # project run via `claude -p` (headless mode) on subscription auth, not
+  # an API key -- the Agent SDK / API-key path was dropped because it
+  # explicitly can't use claude.ai subscription login for third-party
+  # products; `claude -p` itself is Claude Code's own supported way for a
+  # subscriber to script their personal usage.
+  curl -fsSL https://claude.ai/install.sh | bash || {
+    echo "Claude Code install failed — see https://code.claude.com/docs/en/setup.md" >&2
+    echo "and install it manually before continuing." >&2
+  }
 else
-  echo "ant already installed, skipping."
+  echo "claude already installed, skipping."
 fi
 
 mkdir -p "$CREDENTIALS_DIR"
 chmod 700 "$CREDENTIALS_DIR"
 
-anthropic_choice=""
+log "Checking Claude Code login"
+CLAUDE_LOGGED_IN=false
+if command -v claude >/dev/null 2>&1; then
+  if claude auth status --json 2>/dev/null | grep -q '"loggedIn":[[:space:]]*true'; then
+    CLAUDE_LOGGED_IN=true
+    echo "Already logged in."
+  fi
+fi
+if [ "$CLAUDE_LOGGED_IN" = false ] && command -v claude >/dev/null 2>&1; then
+  echo
+  echo "Not logged in. Claude Code will print a URL below — open it on any device"
+  echo "with a browser, sign in, then paste the code it gives you back here."
+  echo
+  claude auth login < "$TTY_IN" || {
+    echo "Login did not complete — you can run 'claude auth login' manually later." >&2
+  }
+fi
 
 if [ -f "$CREDENTIALS_FILE" ] && [ "$RECONFIGURE" = false ]; then
   log "Credentials already configured at $CREDENTIALS_FILE (use --reconfigure to redo this)"
 else
   log "Configuring credentials (all stored in $CREDENTIALS_FILE, mode 600)"
-
-  echo
-  echo "Anthropic access:"
-  echo "  1) I already ran (or will run) 'ant auth login' — leave ANTHROPIC_API_KEY empty"
-  echo "  2) I have an API key to paste in"
-  read -r -p "Choose 1 or 2 [1]: " anthropic_choice < "$TTY_IN"
-  anthropic_choice="${anthropic_choice:-1}"
-  ANTHROPIC_API_KEY=""
-  if [ "$anthropic_choice" = "2" ]; then
-    read -r -s -p "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY < "$TTY_IN"
-    echo
-  fi
 
   read -r -p "GITHUB_TOKEN (fine-grained PAT, Contents/PRs/Workflows/Pages read-write): " GITHUB_TOKEN < "$TTY_IN"
   read -r -p "GITHUB_OWNER [sauliusc]: " GITHUB_OWNER < "$TTY_IN"
@@ -123,7 +120,6 @@ else
   echo
 
   cat > "$CREDENTIALS_FILE" <<EOF
-ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 GITHUB_TOKEN=$GITHUB_TOKEN
 GITHUB_OWNER=$GITHUB_OWNER
 CONSOLE_BASIC_AUTH_USER=$CONSOLE_USER
@@ -162,8 +158,8 @@ IP="$(hostname -I | awk '{print $1}')"
 log "Done"
 echo "Console: http://${IP:-<this-container-ip>}/"
 echo
-if [ "$anthropic_choice" = "1" ]; then
-  echo "Reminder: run 'ant auth login' if you haven't yet — the console will warn on"
-  echo "startup (journalctl -u travel-console) until Anthropic credentials are present."
+if [ "$CLAUDE_LOGGED_IN" = false ]; then
+  echo "Reminder: run 'claude auth login' if it didn't complete above — the console"
+  echo "will warn on startup (journalctl -u travel-console) until it's logged in."
 fi
 echo "Logs: journalctl -u travel-console -f"
