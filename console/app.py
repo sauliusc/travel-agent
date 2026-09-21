@@ -8,7 +8,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, Form
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -45,24 +45,24 @@ def index():
 def _run_pipeline(trip_id: str, requirements_text: str):
     queue = _queues[trip_id]
 
-    def log(message: str):
-        db.add_event(trip_id, message)
+    def log(message: str, level: str = "info"):
+        db.add_event(trip_id, message, level)
         queue.put_nowait(message)
 
     try:
         db.set_status(trip_id, "running")
         log("Pradedama...")
         page_html = run_travel_planner(requirements_text)
-        # TODO: once the CI/CD agent (#9 follow-up) exists, this becomes the
-        # real GitHub Pages URL it returns instead of a local marker.
+        # TODO: once the CI/CD agent returns a real URL, wire it in here
+        # instead of this placeholder.
         db.set_status(trip_id, "done", page_url="(CI/CD agent not implemented yet)")
         log("Baigta.")
     except NotImplementedError as e:
         db.set_status(trip_id, "failed")
-        log(f"Klaida: {e}")
+        log(f"Klaida: {e}", level="error")
     except Exception as e:  # noqa: BLE001 - surface any failure to the console log
         db.set_status(trip_id, "failed")
-        log(f"Nepavyko: {e}")
+        log(f"Nepavyko: {e}", level="error")
     finally:
         queue.put_nowait(None)  # sentinel: stream ends
 
@@ -74,6 +74,27 @@ def create_trip(background_tasks: BackgroundTasks, requirements_text: str = Form
     _queues[trip_id] = asyncio.Queue()
     background_tasks.add_task(_run_pipeline, trip_id, requirements_text)
     return {"trip_id": trip_id}
+
+
+@app.post("/trips/{trip_id}/retry")
+def retry_trip(trip_id: str, background_tasks: BackgroundTasks):
+    original = db.get_trip(trip_id)
+    if original is None:
+        raise HTTPException(404, "Trip not found")
+    new_id = uuid.uuid4().hex[:12]
+    db.create_trip(new_id, original["requirements_text"])
+    _queues[new_id] = asyncio.Queue()
+    background_tasks.add_task(_run_pipeline, new_id, original["requirements_text"])
+    return {"trip_id": new_id}
+
+
+@app.delete("/trips/{trip_id}")
+def delete_trip(trip_id: str):
+    if db.get_trip(trip_id) is None:
+        raise HTTPException(404, "Trip not found")
+    db.delete_trip(trip_id)
+    _queues.pop(trip_id, None)
+    return {"deleted": trip_id}
 
 
 @app.get("/trips/{trip_id}/events")
@@ -98,3 +119,15 @@ async def trip_events(trip_id: str):
 @app.get("/trips")
 def trips():
     return [dict(row) for row in db.list_trips()]
+
+
+@app.get("/trips/{trip_id}")
+def trip_detail(trip_id: str):
+    trip = db.get_trip(trip_id)
+    if trip is None:
+        raise HTTPException(404, "Trip not found")
+    events = db.get_events(trip_id)
+    return {
+        **dict(trip),
+        "events": [dict(row) for row in events],
+    }
