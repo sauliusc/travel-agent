@@ -10,6 +10,7 @@ partial run fails loudly instead of silently producing a broken page.
 from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.itinerary import fix, plan
 from agents.logistics import validate
+from agents.requirements import analyze as run_requirements_analyst
 
 
 def _not_implemented(name: str):
@@ -19,7 +20,6 @@ def _not_implemented(name: str):
     return stub
 
 
-run_requirements_analyst = _not_implemented("Requirements Analyst")
 run_research = _not_implemented("Research")
 run_accommodation = _not_implemented("Accommodation")
 run_map = _not_implemented("Map")
