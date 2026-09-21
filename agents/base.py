@@ -15,10 +15,37 @@ Anthropic-SDK-based version.
 """
 
 import json
+import os
+import shutil
 import subprocess
+from pathlib import Path
 
-CLAUDE_BIN = "claude"
 DEFAULT_TIMEOUT = 600  # seconds
+
+# Common install locations the official installer (claude.ai/install.sh) can
+# use, checked if a bare "claude" isn't resolved via PATH. This matters most
+# for the systemd service: the installer adds ~/.local/bin to PATH via
+# .bashrc, which systemd units don't source -- confirmed on a real
+# deployment where `claude` worked in an interactive shell but not under
+# systemd. The unit file also sets PATH explicitly now; this is a second,
+# independent line of defense in case that ever drifts out of sync again.
+_FALLBACK_CLAUDE_PATHS = [
+    Path.home() / ".local" / "bin" / "claude",
+    Path("/usr/local/bin/claude"),
+]
+
+
+def _resolve_claude_bin() -> str:
+    override = os.environ.get("CLAUDE_BIN")
+    if override:
+        return override
+    found = shutil.which("claude")
+    if found:
+        return found
+    for candidate in _FALLBACK_CLAUDE_PATHS:
+        if candidate.is_file():
+            return str(candidate)
+    return "claude"  # let subprocess.run raise FileNotFoundError with a clear message
 
 
 class ClaudeCLIError(RuntimeError):
@@ -40,7 +67,7 @@ def _invoke_claude(
     a structured-output field, not just "result").
     """
     cmd = [
-        CLAUDE_BIN,
+        _resolve_claude_bin(),
         "-p",
         user_input,
         "--append-system-prompt",

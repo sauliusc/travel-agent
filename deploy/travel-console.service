@@ -16,6 +16,12 @@ WorkingDirectory=/opt/travel-agent
 # the `claude` CLI subprocess agents/base.py spawns needs $HOME to find
 # its subscription credentials under ~/.claude/, so this must be explicit.
 Environment=HOME=/root
+# Likewise PATH: systemd's default PATH doesn't include ~/.local/bin,
+# where the official Claude Code installer (claude.ai/install.sh) puts
+# the `claude` binary -- confirmed on a real deployment, where `claude`
+# resolved fine in an interactive root shell (via .bashrc) but the
+# systemd service failed with "'claude' binary not found on PATH".
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/travel-agent/.venv/bin/uvicorn console.app:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=3
