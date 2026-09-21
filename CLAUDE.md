@@ -18,12 +18,23 @@ Weather/Season, Review/Critic, Documentation, CI/CD.
 
 ## Technologijos
 
-- **Python 3.10+**, `anthropic` SDK 1.x, `client.beta.messages.tool_runner()` su `@beta_tool`
-- Modelis: `claude-opus-5`, `thinking: {"type": "adaptive"}`
-- Nemokami išoriniai API: OSRM (važiavimo laikai), Overpass (kelio tipas), Wikimedia Commons
-  (nuotraukos), Open-Meteo (oras); Anthropic `web_search`/`web_fetch` server tools tyrimui
-- Strukūruotos agentų tarpusavio išvestys per Pydantic + `output_config.format`
+- **Python 3.10+**. Agentai veikia per **Claude Code CLI** (`claude -p`, headless/print
+  mode) subprocess kvietimais (`agents/base.py`), autentifikacija — **prenumeratos**
+  `claude auth login` (claude.ai Pro/Max), **ne** API raktas. Priežastis: atskira
+  `claude-agent-sdk` biblioteka aiškiai reikalauja API rakto ir draudžia prenumeratos
+  autentifikaciją trečiųjų šalių produktams — bet `claude -p` yra oficialus, palaikomas
+  Claude Code būdas prenumeratoriui automatizuoti savo asmeninį naudojimą (skiriasi nuo
+  Agent SDK).
+- Custom "įrankiai" (`tools/osrm.py`, `overpass.py`, `wikimedia.py`, `open_meteo.py`) yra
+  paprasti CLI scenarijai (`argparse` + `__main__`), kuriuos agentas kviečia per Claude
+  Code įmontuotą **Bash** įrankį — ne per Python-side tool-registration API.
+  `tools/github.py` — išimtis, kviečiamas tiesiogiai iš `agents/cicd.py` (deterministinis
+  GitHub API darbas, ne LLM sprendimas).
+- Strukūruotos išvestys (pvz. `TripRequirements`) per `claude -p --json-schema` + Pydantic
+  validacija (`agents/requirements.py`) — pakeičia Anthropic Messages API
+  `client.messages.parse()`, kuris nebeprieinamas be API rakto.
 - Valdymo konsolė: FastAPI + HTMX + SQLite, skirta paleisti iš vienos vietos (žr. `console/`)
+- `console/config.py` paleidimo metu tikrina `claude auth status --json` (ne API raktą)
 
 ## Darbo eiga
 

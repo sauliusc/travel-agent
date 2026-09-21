@@ -11,6 +11,11 @@ StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/opt/travel-agent
+# systemd does NOT automatically populate $HOME for a unit with no User=
+# set (it runs as root, but the environment isn't a login shell's) --
+# the `claude` CLI subprocess agents/base.py spawns needs $HOME to find
+# its subscription credentials under ~/.claude/, so this must be explicit.
+Environment=HOME=/root
 ExecStart=/opt/travel-agent/.venv/bin/uvicorn console.app:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=3
