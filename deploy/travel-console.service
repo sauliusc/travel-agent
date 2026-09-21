@@ -1,6 +1,13 @@
 [Unit]
 Description=Travel planning console
 After=network.target
+# Stop retrying after 5 failures within 60s instead of crash-looping
+# indefinitely (a real incident: a missing dependency once produced 170+
+# restart attempts before anyone noticed) — `systemctl status
+# travel-console` then shows a clear "start-limit-hit" instead of an
+# ever-growing journal.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/opt/travel-agent
