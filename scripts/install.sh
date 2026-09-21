@@ -36,6 +36,19 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# When invoked as `curl ... | bash`, bash's stdin (fd 0) is the incoming
+# script text, not your keyboard — every `read` below would otherwise
+# silently consume upcoming script lines as "input" and desync the whole
+# run. Force all interactive reads through /dev/tty instead, which is the
+# real terminal regardless of how this script was launched.
+if [ -r /dev/tty ]; then
+  TTY_IN=/dev/tty
+else
+  echo "No /dev/tty available — can't prompt interactively (e.g. running in CI)." >&2
+  echo "Set credentials via a pre-existing /etc/travel-agent/credentials.env instead." >&2
+  exit 1
+fi
+
 log "Installing system packages"
 apt-get update -qq
 apt-get install -y -qq python3-venv python3-pip git curl caddy >/dev/null
@@ -78,21 +91,21 @@ else
   echo "Anthropic access:"
   echo "  1) I already ran (or will run) 'ant auth login' — leave ANTHROPIC_API_KEY empty"
   echo "  2) I have an API key to paste in"
-  read -r -p "Choose 1 or 2 [1]: " anthropic_choice
+  read -r -p "Choose 1 or 2 [1]: " anthropic_choice < "$TTY_IN"
   anthropic_choice="${anthropic_choice:-1}"
   ANTHROPIC_API_KEY=""
   if [ "$anthropic_choice" = "2" ]; then
-    read -r -s -p "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY
+    read -r -s -p "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY < "$TTY_IN"
     echo
   fi
 
-  read -r -p "GITHUB_TOKEN (fine-grained PAT, Contents/PRs/Workflows/Pages read-write): " GITHUB_TOKEN
-  read -r -p "GITHUB_OWNER [sauliusc]: " GITHUB_OWNER
+  read -r -p "GITHUB_TOKEN (fine-grained PAT, Contents/PRs/Workflows/Pages read-write): " GITHUB_TOKEN < "$TTY_IN"
+  read -r -p "GITHUB_OWNER [sauliusc]: " GITHUB_OWNER < "$TTY_IN"
   GITHUB_OWNER="${GITHUB_OWNER:-sauliusc}"
 
-  read -r -p "Console basic-auth username [saulius]: " CONSOLE_USER
+  read -r -p "Console basic-auth username [saulius]: " CONSOLE_USER < "$TTY_IN"
   CONSOLE_USER="${CONSOLE_USER:-saulius}"
-  read -r -s -p "Console basic-auth password: " CONSOLE_PASSWORD
+  read -r -s -p "Console basic-auth password: " CONSOLE_PASSWORD < "$TTY_IN"
   echo
 
   cat > "$CREDENTIALS_FILE" <<EOF
