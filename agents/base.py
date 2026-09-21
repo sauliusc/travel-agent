@@ -25,6 +25,58 @@ class ClaudeCLIError(RuntimeError):
     """Raised when the claude CLI exits non-zero or returns malformed output."""
 
 
+def _invoke_claude(
+    system_prompt: str,
+    allowed_tools: list[str],
+    user_input: str,
+    permission_mode: str = "auto",
+    timeout: int = DEFAULT_TIMEOUT,
+    extra_args: list[str] | None = None,
+) -> dict:
+    """Run `claude -p` and return its full parsed JSON payload.
+
+    Shared by run_agent() (plain text agents) and requirements.py's
+    schema-validated extraction (which also needs the raw payload to read
+    a structured-output field, not just "result").
+    """
+    cmd = [
+        CLAUDE_BIN,
+        "-p",
+        user_input,
+        "--append-system-prompt",
+        system_prompt,
+        "--allowedTools",
+        ",".join(allowed_tools),
+        "--permission-mode",
+        permission_mode,
+        "--output-format",
+        "json",
+        *(extra_args or []),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as e:
+        raise ClaudeCLIError(
+            "'claude' binary not found on PATH -- install Claude Code and run "
+            "`claude auth login` (see docs/PROXMOX_SETUP.md)"
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise ClaudeCLIError(f"claude did not finish within {timeout}s") from e
+
+    if result.returncode != 0:
+        raise ClaudeCLIError(
+            f"claude exited {result.returncode}: "
+            f"{(result.stderr or result.stdout).strip()[:2000]}"
+        )
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise ClaudeCLIError(
+            f"claude returned non-JSON stdout: {result.stdout[:500]!r}"
+        ) from e
+
+
 def run_agent(
     system_prompt: str,
     allowed_tools: list[str],
@@ -46,42 +98,7 @@ def run_agent(
             modes (e.g. "dontAsk" also denies prompt-only tools outright)
         timeout: seconds to wait for the subprocess before raising
     """
-    cmd = [
-        CLAUDE_BIN,
-        "-p",
-        user_input,
-        "--append-system-prompt",
-        system_prompt,
-        "--allowedTools",
-        ",".join(allowed_tools),
-        "--permission-mode",
-        permission_mode,
-        "--output-format",
-        "json",
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except FileNotFoundError as e:
-        raise ClaudeCLIError(
-            "'claude' binary not found on PATH -- install Claude Code and run "
-            "`claude login` (see docs/PROXMOX_SETUP.md)"
-        ) from e
-    except subprocess.TimeoutExpired as e:
-        raise ClaudeCLIError(f"claude did not finish within {timeout}s") from e
-
-    if result.returncode != 0:
-        raise ClaudeCLIError(
-            f"claude exited {result.returncode}: "
-            f"{(result.stderr or result.stdout).strip()[:2000]}"
-        )
-
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        raise ClaudeCLIError(
-            f"claude returned non-JSON stdout: {result.stdout[:500]!r}"
-        ) from e
-
+    payload = _invoke_claude(system_prompt, allowed_tools, user_input, permission_mode, timeout)
     text = payload.get("result")
     if text is None:
         raise ClaudeCLIError(f"claude JSON output missing 'result' field: {payload!r}")
