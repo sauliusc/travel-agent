@@ -21,9 +21,6 @@ from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 from agents.weather import check as run_weather
 
-GITHUB_OWNER = os.environ.get("GITHUB_OWNER", "sauliusc")
-
-
 def _slugify(requirements) -> str:
     base = f"{requirements.destination}-{requirements.trip_type}"
     return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
@@ -63,7 +60,7 @@ def run_travel_planner(user_requirements: str) -> str:
 
     repo_name = _slugify(requirements)
     deploy_log = run_cicd(
-        owner=GITHUB_OWNER,
+        owner=os.environ.get("GITHUB_OWNER", "sauliusc"),
         repo_name=repo_name,
         description=f"{requirements.destination} trip page",
         page_html=page,

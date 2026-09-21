@@ -4,6 +4,7 @@ Run with: uvicorn console.app:app --host 127.0.0.1 --port 8000
 """
 
 import asyncio
+import logging
 import uuid
 from pathlib import Path
 
@@ -11,12 +12,13 @@ from fastapi import BackgroundTasks, FastAPI, Form
 from fastapi.responses import FileResponse, HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
-from console import db
+from console import config, db
 from orchestrator import run_travel_planner
 
 app = FastAPI(title="Travel planning console")
 
 STATIC_DIR = Path(__file__).parent / "static"
+logger = logging.getLogger("travel-console")
 
 # In-memory per-trip event queues for SSE; trip_events table is the durable log.
 _queues: dict[str, asyncio.Queue] = {}
@@ -25,6 +27,14 @@ _queues: dict[str, asyncio.Queue] = {}
 @app.on_event("startup")
 def on_startup():
     db.init_db()
+    problems = config.require_credentials()
+    for problem in problems:
+        logger.warning("Startup credential check: %s", problem)
+    if problems:
+        logger.warning(
+            "The console will start, but any trip run will fail until these are fixed "
+            "(see .env.example / docs/PROXMOX_SETUP.md)."
+        )
 
 
 @app.get("/", response_class=HTMLResponse)
