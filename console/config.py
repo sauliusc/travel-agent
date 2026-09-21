@@ -1,18 +1,28 @@
 """Centralized credential loading and validation.
 
-Every secret the system needs (Anthropic, GitHub, console basic auth) lives
-in exactly one place: environment variables, optionally populated from a
-dotenv-style file (see .env.example). This module owns finding that file
-and checking what's missing — so a misconfigured deploy fails loudly at
-startup with one clear message, instead of a KeyError three agents deep
-into a run.
+Every secret the system needs lives in exactly one place: environment
+variables, optionally populated from a dotenv-style file (see
+.env.example). This module owns finding that file and checking what's
+missing — so a misconfigured deploy fails loudly at startup with one
+clear message, instead of a KeyError or a mysterious claude CLI error
+three agents deep into a run.
 
-No external dependency (no python-dotenv) — the format is deliberately
+Anthropic access is no longer a credential this project manages itself:
+agents run through the Claude Code CLI on subscription auth
+(`claude auth login`), not an API key, so there is nothing to load for
+it here -- only to check. `claude auth status --json` is the verified
+way to check that (confirmed against the real installed CLI; its exact
+output shape is {"loggedIn": bool, "authMethod": str, "apiProvider": str,
+"configDirectory": str}).
+
+No external dependency (no python-dotenv) -- the format is deliberately
 trivial (KEY=VALUE, # comments, blank lines) so hand-parsing it is simpler
 than adding a package for it.
 """
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
 # Checked in order; the first file that exists is loaded. A real env var
@@ -43,12 +53,32 @@ def load_credentials() -> None:
         _load_dotenv_file(path)
 
 
-def _has_anthropic_credentials() -> bool:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return True
-    # `ant auth login` stores a profile here; its mere presence is enough —
-    # the anthropic SDK reads it on its own, no env var needed.
-    return (Path.home() / ".config" / "anthropic").exists()
+def _check_claude_auth() -> str | None:
+    """Return None if `claude` is authenticated, else a human-readable problem."""
+    try:
+        result = subprocess.run(
+            ["claude", "auth", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        return (
+            "'claude' binary not found on PATH -- install Claude Code and run "
+            "`claude auth login` (see docs/PROXMOX_SETUP.md)"
+        )
+    except subprocess.TimeoutExpired:
+        return "`claude auth status` did not respond within 15s"
+
+    try:
+        status = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return f"`claude auth status --json` returned non-JSON output: {result.stdout[:300]!r}"
+
+    if not status.get("loggedIn"):
+        return "Not logged into Claude Code -- run `claude auth login` (subscription sign-in)"
+
+    return None
 
 
 def require_credentials() -> list[str]:
@@ -60,10 +90,10 @@ def require_credentials() -> list[str]:
     load_credentials()
     problems = []
 
-    if not _has_anthropic_credentials():
-        problems.append(
-            "No Anthropic credentials found: set ANTHROPIC_API_KEY or run `ant auth login`."
-        )
+    claude_problem = _check_claude_auth()
+    if claude_problem:
+        problems.append(claude_problem)
+
     if not os.environ.get("GITHUB_TOKEN"):
         problems.append(
             "GITHUB_TOKEN is not set — the CI/CD agent needs it to create repos and push files."
