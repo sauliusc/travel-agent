@@ -21,9 +21,13 @@ from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 from agents.weather import check as run_weather
 
+REPO_PREFIX = "ai-trip-"
+
+
 def _slugify(requirements) -> str:
     base = f"{requirements.destination}-{requirements.trip_type}"
-    return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
+    return f"{REPO_PREFIX}{slug}"
 
 
 def run_travel_planner(user_requirements: str) -> str:
