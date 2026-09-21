@@ -17,6 +17,7 @@ from agents.map_agent import build_map_data as run_map
 from agents.page_designer import design as run_page_designer
 from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
+from agents.weather import check as run_weather
 
 
 def _not_implemented(name: str):
@@ -24,7 +25,7 @@ def _not_implemented(name: str):
         raise NotImplementedError(f"{name} agent is not implemented yet (see GitHub issues)")
 
     return stub
-run_weather = _not_implemented("Weather")
+
 run_cicd = _not_implemented("CI/CD")
 
 
@@ -37,9 +38,13 @@ def run_travel_planner(user_requirements: str) -> str:
     requirements = run_requirements_analyst(user_requirements)
     requirements_json = requirements.model_dump_json()
     research = run_research(requirements_json)
+    weather = run_weather(requirements_json)
     accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
 
-    itinerary = plan(f"requirements={requirements_json}\nresearch={research}\naccommodation={accommodation}")
+    itinerary = plan(
+        f"requirements={requirements_json}\nresearch={research}\n"
+        f"weather={weather}\naccommodation={accommodation}"
+    )
     logistics_report = validate(itinerary)
 
     map_data = run_map(itinerary)
