@@ -13,6 +13,7 @@ from agents.logistics import validate
 from agents.accommodation import find as run_accommodation
 from agents.images import fetch_images as run_images
 from agents.map_agent import build_map_data as run_map
+from agents.page_designer import design as run_page_designer
 from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 
@@ -23,7 +24,7 @@ def _not_implemented(name: str):
 
     return stub
 
-run_page_designer = _not_implemented("Page Designer")
+
 run_budget = _not_implemented("Budget")
 run_weather = _not_implemented("Weather")
 run_cicd = _not_implemented("CI/CD")
