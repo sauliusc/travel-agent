@@ -1,0 +1,18 @@
+[Unit]
+Description=Travel planning console
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/travel-agent
+ExecStart=/opt/travel-agent/.venv/bin/uvicorn console.app:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+
+# console/config.py reads /etc/travel-agent/credentials.env itself at
+# startup — this unit only needs read access to it, no EnvironmentFile=
+# needed. Locking the file down to root is enough since the service runs
+# as root (fine for a single-user personal LXC; see docs/PROXMOX_SETUP.md
+# for hardening notes if you want a dedicated service user later).
+
+[Install]
+WantedBy=multi-user.target

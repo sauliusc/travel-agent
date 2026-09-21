@@ -44,15 +44,24 @@ implementuojamas atskirame PR (`claude/*` šakos, automatiškai sujungiamos į `
 
 ## Setup
 
+### Proxmox LXC (vienas komandos paleidimas)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sauliusc/travel-agent/main/scripts/install.sh | bash
+```
+
+Įdiegia viską (sistema, Python, venv, `ant` CLI, systemd servisą, Caddy), paklausia
+credential'ų ir juos saugo vienoje vietoje — `/etc/travel-agent/credentials.env` (600).
+Pilnos instrukcijos: `docs/PROXMOX_SETUP.md`.
+
+### Lokalus vystymas
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Anthropic prieiga (rekomenduojama)
-ant auth login
-
-# GitHub prieiga CI/CD Agentui
-export GITHUB_TOKEN="github_pat_..."
+cp .env.example .env   # užpildyti GITHUB_TOKEN ir kt. — console/config.py nuskaito automatiškai
+ant auth login          # arba ANTHROPIC_API_KEY faile .env
 ```
 
-Pilnos diegimo instrukcijos (įskaitant Proxmox LXC): `docs/PROXMOX_SETUP.md`.
+Visi reikalingi credential'ai ir jų paskirtis aprašyti `.env.example`.
