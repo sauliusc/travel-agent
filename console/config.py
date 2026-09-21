@@ -25,6 +25,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from agents.base import _resolve_claude_bin
+
 # Checked in order; the first file that exists is loaded. A real env var
 # (e.g. set by a systemd EnvironmentFile=) always wins over either of these.
 CREDENTIALS_FILES = [
@@ -57,7 +59,7 @@ def _check_claude_auth() -> str | None:
     """Return None if `claude` is authenticated, else a human-readable problem."""
     try:
         result = subprocess.run(
-            ["claude", "auth", "status", "--json"],
+            [_resolve_claude_bin(), "auth", "status", "--json"],
             capture_output=True,
             text=True,
             timeout=15,
