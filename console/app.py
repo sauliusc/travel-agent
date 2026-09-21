@@ -4,6 +4,7 @@ Run with: uvicorn console.app:app --host 127.0.0.1 --port 8000
 """
 
 import asyncio
+import html
 import logging
 import uuid
 from pathlib import Path
@@ -119,6 +120,34 @@ async def trip_events(trip_id: str):
 @app.get("/trips")
 def trips():
     return [dict(row) for row in db.list_trips()]
+
+
+_STATUS_LABELS = {"queued": "Laukia", "running": "Vykdoma", "done": "Baigta", "failed": "Nepavyko"}
+
+
+def _render_trip_item(trip: dict) -> str:
+    title = html.escape(trip["requirements_text"][:90].replace("\n", " "))
+    status = trip["status"]
+    label = html.escape(_STATUS_LABELS.get(status, status))
+    created = html.escape((trip["created_at"] or "")[:16])
+    trip_id = html.escape(trip["id"])
+    return (
+        f'<div class="trip-item" data-trip-id="{trip_id}" onclick="openTrip(\'{trip_id}\')">'
+        f'<div class="title">{title}</div>'
+        f'<div class="trip-row">'
+        f'<span class="badge {status}">{label}</span>'
+        f'<span class="trip-time">{created}</span>'
+        f"</div></div>"
+    )
+
+
+@app.get("/trips/list", response_class=HTMLResponse)
+def trips_list_html():
+    """HTML fragment for the sidebar, polled by HTMX (hx-trigger="load, every 5s")."""
+    rows = db.list_trips()
+    if not rows:
+        return '<div class="empty-list">Kol kas nėra kelionių.</div>'
+    return "".join(_render_trip_item(dict(row)) for row in rows)
 
 
 @app.get("/trips/{trip_id}")
