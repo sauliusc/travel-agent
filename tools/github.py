@@ -10,7 +10,6 @@ import base64
 import os
 
 import httpx
-from anthropic import beta_tool
 
 API_URL = "https://api.github.com"
 
@@ -24,7 +23,6 @@ def _headers() -> dict:
     }
 
 
-@beta_tool
 def create_repo(name: str, description: str = "", private: bool = True) -> str:
     """Create a new GitHub repository under the authenticated user's account.
 
@@ -45,7 +43,6 @@ def create_repo(name: str, description: str = "", private: bool = True) -> str:
     return f"Created {data['full_name']} at {data['html_url']}"
 
 
-@beta_tool
 def push_file(owner: str, repo: str, path: str, content: str, message: str, branch: str = "main") -> str:
     """Create or update a single file in a repository via the Contents API.
 
@@ -83,7 +80,6 @@ def push_file(owner: str, repo: str, path: str, content: str, message: str, bran
     return f"Pushed {path} to {owner}/{repo}@{branch}"
 
 
-@beta_tool
 def enable_pages(owner: str, repo: str) -> str:
     """Enable GitHub Pages for a repository, sourced from GitHub Actions.
 
@@ -102,7 +98,6 @@ def enable_pages(owner: str, repo: str) -> str:
     return f"Pages enabled for {owner}/{repo}: https://{owner}.github.io/{repo}/"
 
 
-@beta_tool
 def trigger_workflow(owner: str, repo: str, workflow_file: str, ref: str = "main") -> str:
     """Trigger a workflow_dispatch run for a given workflow file.
 
