@@ -26,20 +26,20 @@ def deploy(owner: str, repo_name: str, description: str, page_html: str, images_
             per stop). Not yet parsed into the fetch-images.yml file list —
             embedded as a comment for now (see NOTE below and issue #14 follow-up).
     """
-    log = [create_repo.func(name=repo_name, description=description, private=True)]
+    log = [create_repo(name=repo_name, description=description, private=True)]
 
-    log.append(push_file.func(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: initial trip page"))
+    log.append(push_file(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: initial trip page"))
 
     auto_merge_yml = (TEMPLATES_DIR / "auto-merge.yml").read_text()
     deploy_yml = (TEMPLATES_DIR / "deploy.yml").read_text()
     log.append(
-        push_file.func(
+        push_file(
             owner=owner, repo=repo_name, path=".github/workflows/auto-merge.yml",
             content=auto_merge_yml, message="chore: auto-merge workflow",
         )
     )
     log.append(
-        push_file.func(
+        push_file(
             owner=owner, repo=repo_name, path=".github/workflows/deploy.yml",
             content=deploy_yml, message="chore: deploy workflow",
         )
@@ -54,13 +54,13 @@ def deploy(owner: str, repo_name: str, description: str, page_html: str, images_
         "# IMAGES_PLACEHOLDER", f"# TODO: fill in from Image agent output below\n{commented_summary}"
     )
     log.append(
-        push_file.func(
+        push_file(
             owner=owner, repo=repo_name, path=".github/workflows/fetch-images.yml",
             content=fetch_images_yml, message="chore: fetch-images workflow",
         )
     )
 
-    log.append(enable_pages.func(owner=owner, repo=repo_name))
-    log.append(trigger_workflow.func(owner=owner, repo=repo_name, workflow_file="fetch-images.yml"))
+    log.append(enable_pages(owner=owner, repo=repo_name))
+    log.append(trigger_workflow(owner=owner, repo=repo_name, workflow_file="fetch-images.yml"))
 
     return "\n".join(log)

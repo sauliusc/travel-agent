@@ -3,10 +3,15 @@
 Used by the Logistics Validator agent to catch routes that pass through
 unpaved 4x4-only tracks (highway=track) before they end up in an itinerary —
 the exact mistake behind the SH74 (Osum -> Permet) route in the Albania trip.
+
+Callable both as a Python function and as a CLI script, so the agent
+(running under Claude Code) can invoke it via the Bash tool:
+`python3 tools/overpass.py --lat .. --lon .. [--radius-m 200]`
 """
 
+import argparse
+
 import httpx
-from anthropic import beta_tool
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
@@ -14,15 +19,8 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OFFROAD_TAGS = {"track", "path", "bridleway", "footway"}
 
 
-@beta_tool
 def road_type(lat: float, lon: float, radius_m: int = 200) -> str:
-    """Return the OSM highway type(s) found near a coordinate, flagging off-road tracks.
-
-    Args:
-        lat: latitude of the point to check
-        lon: longitude of the point to check
-        radius_m: search radius in meters around the point (default 200)
-    """
+    """Return the OSM highway type(s) found near a coordinate, flagging off-road tracks."""
     query = f"""
     [out:json][timeout:25];
     way(around:{radius_m},{lat},{lon})["highway"];
@@ -44,3 +42,16 @@ def road_type(lat: float, lon: float, radius_m: int = 200) -> str:
             f"{', '.join(highway_types)}"
         )
     return f"Road types nearby: {', '.join(highway_types)} (no off-road segments detected)"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--lat", type=float, required=True)
+    parser.add_argument("--lon", type=float, required=True)
+    parser.add_argument("--radius-m", type=int, default=200)
+    args = parser.parse_args()
+    print(road_type(args.lat, args.lon, args.radius_m))
+
+
+if __name__ == "__main__":
+    main()
