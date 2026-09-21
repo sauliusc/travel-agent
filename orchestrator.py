@@ -11,6 +11,7 @@ from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.itinerary import fix, plan
 from agents.logistics import validate
 from agents.requirements import analyze as run_requirements_analyst
+from agents.research import research as run_research
 
 
 def _not_implemented(name: str):
@@ -18,9 +19,6 @@ def _not_implemented(name: str):
         raise NotImplementedError(f"{name} agent is not implemented yet (see GitHub issues)")
 
     return stub
-
-
-run_research = _not_implemented("Research")
 run_accommodation = _not_implemented("Accommodation")
 run_map = _not_implemented("Map")
 run_images = _not_implemented("Image")
@@ -37,7 +35,7 @@ def run_travel_planner(user_requirements: str) -> str:
         user_requirements: free-text trip request from the user
     """
     requirements = run_requirements_analyst(user_requirements)
-    research = run_research(requirements)
+    research = run_research(requirements.model_dump_json())
     accommodation = run_accommodation(requirements)
 
     itinerary = plan(f"requirements={requirements}\nresearch={research}\naccommodation={accommodation}")
