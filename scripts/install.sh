@@ -70,9 +70,23 @@ fi
 
 log "Installing the Anthropic CLI (ant)"
 if ! command -v ant >/dev/null 2>&1; then
-  curl -fsSL https://cli.anthropic.com/install.sh | sh || {
-    echo "ant CLI install failed — you can skip it and set ANTHROPIC_API_KEY instead." >&2
-  }
+  # Installs from GitHub Releases (github.com/anthropics/anthropic-cli) —
+  # this is the documented Linux install path. A previous version of this
+  # script piped from an unverified cli.anthropic.com URL that turned out
+  # not to resolve; this replaces it with a source we can actually confirm.
+  ANT_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ANT_ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+  ANT_TAG="$(curl -fsSL https://api.github.com/repos/anthropics/anthropic-cli/releases/latest \
+    | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"
+  if [ -n "$ANT_TAG" ]; then
+    ANT_VERSION="${ANT_TAG#v}"
+    curl -fsSL "https://github.com/anthropics/anthropic-cli/releases/download/${ANT_TAG}/ant_${ANT_VERSION}_${ANT_OS}_${ANT_ARCH}.tar.gz" \
+      | tar -xz -C /usr/local/bin ant || {
+      echo "ant CLI install failed — you can skip it and set ANTHROPIC_API_KEY instead." >&2
+    }
+  else
+    echo "Could not determine the latest ant CLI release — you can skip it and set ANTHROPIC_API_KEY instead." >&2
+  fi
 else
   echo "ant already installed, skipping."
 fi
