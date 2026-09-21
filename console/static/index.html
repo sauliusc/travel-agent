@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<title>Kelionių planuotojas</title>
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2/sse.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  textarea { width: 100%; height: 6rem; font: inherit; padding: .5rem; }
+  button { padding: .5rem 1rem; font: inherit; cursor: pointer; }
+  #log { background: #111; color: #0f0; font-family: monospace; padding: 1rem; margin-top: 1rem;
+         min-height: 4rem; white-space: pre-wrap; border-radius: 4px; }
+  #trips { margin-top: 2rem; }
+  #trips li { margin: .25rem 0; }
+</style>
+</head>
+<body>
+  <h1>Kelionių planuotojas</h1>
+  <form id="trip-form"
+        hx-post="/trips"
+        hx-ext="json-enc"
+        hx-swap="none"
+        onsubmit="return startTrip(event)">
+    <textarea name="requirements_text" placeholder="Įklijuok kelionės reikalavimus laisvu tekstu..."></textarea>
+    <br><br>
+    <button type="submit">Planuoti</button>
+  </form>
+
+  <div id="log"></div>
+
+  <div id="trips">
+    <h2>Kelionės</h2>
+    <ul id="trip-list" hx-get="/trips" hx-trigger="load" hx-swap="innerHTML"></ul>
+  </div>
+
+<script>
+async function startTrip(evt) {
+  evt.preventDefault();
+  const text = evt.target.requirements_text.value;
+  const log = document.getElementById('log');
+  log.textContent = '';
+
+  const resp = await fetch('/trips', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'requirements_text=' + encodeURIComponent(text),
+  });
+  const { trip_id } = await resp.json();
+
+  const es = new EventSource(`/trips/${trip_id}/events`);
+  es.onmessage = (e) => { log.textContent += e.data + '\n'; };
+  es.onerror = () => es.close();
+  return false;
+}
+</script>
+</body>
+</html>
