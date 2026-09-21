@@ -10,6 +10,7 @@ partial run fails loudly instead of silently producing a broken page.
 from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.itinerary import fix, plan
 from agents.logistics import validate
+from agents.accommodation import find as run_accommodation
 from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 
@@ -19,7 +20,8 @@ def _not_implemented(name: str):
         raise NotImplementedError(f"{name} agent is not implemented yet (see GitHub issues)")
 
     return stub
-run_accommodation = _not_implemented("Accommodation")
+
+
 run_map = _not_implemented("Map")
 run_images = _not_implemented("Image")
 run_page_designer = _not_implemented("Page Designer")
@@ -35,10 +37,11 @@ def run_travel_planner(user_requirements: str) -> str:
         user_requirements: free-text trip request from the user
     """
     requirements = run_requirements_analyst(user_requirements)
-    research = run_research(requirements.model_dump_json())
-    accommodation = run_accommodation(requirements)
+    requirements_json = requirements.model_dump_json()
+    research = run_research(requirements_json)
+    accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
 
-    itinerary = plan(f"requirements={requirements}\nresearch={research}\naccommodation={accommodation}")
+    itinerary = plan(f"requirements={requirements_json}\nresearch={research}\naccommodation={accommodation}")
     logistics_report = validate(itinerary)
 
     map_data = run_map(itinerary)
