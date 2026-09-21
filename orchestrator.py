@@ -11,6 +11,7 @@ from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.itinerary import fix, plan
 from agents.logistics import validate
 from agents.accommodation import find as run_accommodation
+from agents.budget import estimate as run_budget
 from agents.images import fetch_images as run_images
 from agents.map_agent import build_map_data as run_map
 from agents.page_designer import design as run_page_designer
@@ -23,9 +24,6 @@ def _not_implemented(name: str):
         raise NotImplementedError(f"{name} agent is not implemented yet (see GitHub issues)")
 
     return stub
-
-
-run_budget = _not_implemented("Budget")
 run_weather = _not_implemented("Weather")
 run_cicd = _not_implemented("CI/CD")
 
