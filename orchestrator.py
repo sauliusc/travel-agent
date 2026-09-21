@@ -1,32 +1,32 @@
-"""Main orchestration flow: requirements -> research -> logistics -> itinerary ->
-map/images/budget -> page -> critic -> CI/CD.
+"""Main orchestration flow: requirements -> research/weather -> accommodation ->
+itinerary -> logistics validation -> map/images/budget -> page -> critic loop ->
+CI/CD deploy.
 
-Runnable agents (logistics, itinerary, critic) are wired in; agents not yet
-implemented (requirements, research, accommodation, map, images, page_designer,
-budget, weather, docs, cicd) are TODO stubs that raise NotImplementedError so a
-partial run fails loudly instead of silently producing a broken page.
+All 14 agents from the design doc are wired in.
 """
 
-from agents.critic import MAX_FIX_ITERATIONS, review
-from agents.itinerary import fix, plan
-from agents.logistics import validate
+import os
+import re
+
 from agents.accommodation import find as run_accommodation
 from agents.budget import estimate as run_budget
+from agents.cicd import deploy as run_cicd
+from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.images import fetch_images as run_images
+from agents.itinerary import fix, plan
+from agents.logistics import validate
 from agents.map_agent import build_map_data as run_map
 from agents.page_designer import design as run_page_designer
 from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 from agents.weather import check as run_weather
 
+GITHUB_OWNER = os.environ.get("GITHUB_OWNER", "sauliusc")
 
-def _not_implemented(name: str):
-    def stub(*_args, **_kwargs):
-        raise NotImplementedError(f"{name} agent is not implemented yet (see GitHub issues)")
 
-    return stub
-
-run_cicd = _not_implemented("CI/CD")
+def _slugify(requirements) -> str:
+    base = f"{requirements.destination}-{requirements.trip_type}"
+    return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
 
 
 def run_travel_planner(user_requirements: str) -> str:
@@ -61,7 +61,15 @@ def run_travel_planner(user_requirements: str) -> str:
         logistics_report = validate(itinerary)
         page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images})
 
-    run_cicd(page)
+    repo_name = _slugify(requirements)
+    deploy_log = run_cicd(
+        owner=GITHUB_OWNER,
+        repo_name=repo_name,
+        description=f"{requirements.destination} trip page",
+        page_html=page,
+        images_summary=images,
+    )
+    print(deploy_log)
     return page
 
 
