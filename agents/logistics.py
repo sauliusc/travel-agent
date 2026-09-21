@@ -3,10 +3,14 @@
 from pathlib import Path
 
 from agents.base import run_agent
-from tools.osrm import driving_time
-from tools.overpass import road_type
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "logistics.md").read_text()
+
+TOOL_HINT = (
+    "Use Bash to check each leg: `python3 tools/osrm.py --from-lat .. --from-lon .. "
+    "--to-lat .. --to-lon ..` for driving distance/time, and "
+    "`python3 tools/overpass.py --lat .. --lon ..` to flag off-road segments."
+)
 
 
 def validate(itinerary_json: str) -> str:
@@ -15,4 +19,5 @@ def validate(itinerary_json: str) -> str:
     Args:
         itinerary_json: JSON-serialized Itinerary (see schemas/itinerary.py)
     """
-    return run_agent(SYSTEM_PROMPT, [driving_time, road_type], itinerary_json)
+    task = f"{itinerary_json}\n\n{TOOL_HINT}"
+    return run_agent(SYSTEM_PROMPT, ["Bash"], task)

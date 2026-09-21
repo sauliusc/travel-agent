@@ -3,9 +3,12 @@
 from pathlib import Path
 
 from agents.base import run_agent
-from tools.wikimedia import find_image
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "images.md").read_text()
+
+TOOL_HINT = (
+    'Use Bash to look up each stop: `python3 tools/wikimedia.py --query "<place name>"`.'
+)
 
 
 def fetch_images(itinerary_json: str) -> str:
@@ -14,4 +17,5 @@ def fetch_images(itinerary_json: str) -> str:
     Args:
         itinerary_json: JSON-serialized Itinerary (see schemas/itinerary.py)
     """
-    return run_agent(SYSTEM_PROMPT, [find_image], itinerary_json)
+    task = f"{itinerary_json}\n\n{TOOL_HINT}"
+    return run_agent(SYSTEM_PROMPT, ["Bash"], task)

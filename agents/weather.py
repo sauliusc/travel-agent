@@ -3,13 +3,14 @@
 from pathlib import Path
 
 from agents.base import run_agent
-from tools.open_meteo import climate_summary
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "weather.md").read_text()
 
-SERVER_TOOLS = [
-    {"type": "web_search_20260209", "name": "web_search", "max_uses": 5},
-]
+TOOL_HINT = (
+    "Use Bash to check typical conditions: `python3 tools/open_meteo.py --lat .. "
+    "--lon .. --month <1-12>`. Use WebSearch for anything not covered by that "
+    "(e.g. seasonal road closures)."
+)
 
 
 def check(requirements_json: str) -> str:
@@ -18,4 +19,5 @@ def check(requirements_json: str) -> str:
     Args:
         requirements_json: JSON-serialized TripRequirements
     """
-    return run_agent(SYSTEM_PROMPT, [climate_summary, *SERVER_TOOLS], requirements_json)
+    task = f"{requirements_json}\n\n{TOOL_HINT}"
+    return run_agent(SYSTEM_PROMPT, ["Bash", "WebSearch"], task)

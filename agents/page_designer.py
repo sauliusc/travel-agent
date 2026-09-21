@@ -7,9 +7,9 @@ from agents.base import run_agent
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "page_designer.md").read_text()
 
-# Page generation can run long (full HTML output) — give it more room than the
-# 16000-token default used by shorter agent turns.
-MAX_TOKENS = 32000
+# Full-page HTML generation can run long -- give the subprocess more time
+# than the 600s default used by shorter agent turns.
+TIMEOUT = 900
 
 
 def design(context: dict) -> str:
@@ -20,4 +20,4 @@ def design(context: dict) -> str:
             by the corresponding upstream agents)
     """
     task = json.dumps(context, ensure_ascii=False)
-    return run_agent(SYSTEM_PROMPT, [], task, max_tokens=MAX_TOKENS)
+    return run_agent(SYSTEM_PROMPT, [], task, timeout=TIMEOUT)
