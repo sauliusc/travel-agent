@@ -53,7 +53,7 @@ def _run_pipeline(trip_id: str, requirements_text: str):
     try:
         db.set_status(trip_id, "running")
         log("Pradedama...")
-        page_html = run_travel_planner(requirements_text)
+        page_html = run_travel_planner(requirements_text, on_progress=log)
         # TODO: once the CI/CD agent returns a real URL, wire it in here
         # instead of this placeholder.
         db.set_status(trip_id, "done", page_url="(CI/CD agent not implemented yet)")
