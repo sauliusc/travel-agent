@@ -30,38 +30,64 @@ def _slugify(requirements) -> str:
     return f"{REPO_PREFIX}{slug}"
 
 
-def run_travel_planner(user_requirements: str) -> str:
+def run_travel_planner(user_requirements: str, on_progress=None) -> str:
     """Run the full pipeline for one trip request and return the final page HTML.
 
     Args:
         user_requirements: free-text trip request from the user
+        on_progress: optional callable(str) invoked with a short status line
+            before each agent stage -- each `claude -p` call inside a stage
+            can itself take a while (real reasoning, real subscription
+            usage), so without this the caller sees nothing at all between
+            "started" and "finished", which looks identical to hung.
     """
+    progress = on_progress or (lambda _msg: None)
+
+    progress("Reikalavimų analizė...")
     requirements = run_requirements_analyst(user_requirements)
     requirements_json = requirements.model_dump_json()
+
+    progress("Tyrimas (kelionės objektai, keliai, sezoniškumas)...")
     research = run_research(requirements_json)
+
+    progress("Orų/sezono patikra...")
     weather = run_weather(requirements_json)
+
+    progress("Nakvynės paieška...")
     accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
 
+    progress("Dienų plano sudarymas...")
     itinerary = plan(
         f"requirements={requirements_json}\nresearch={research}\n"
         f"weather={weather}\naccommodation={accommodation}"
     )
+
+    progress("Logistikos patikra (važiavimo laikai, keliai)...")
     logistics_report = validate(itinerary)
 
+    progress("Žemėlapio duomenų ruošimas...")
     map_data = run_map(itinerary)
+
+    progress("Nuotraukų paieška...")
     images = run_images(itinerary)
+
+    progress("Biudžeto skaičiavimas...")
     budget = run_budget({"itinerary": itinerary, "accommodation": accommodation})
 
+    progress("Puslapio generavimas...")
     page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images})
 
-    for _ in range(MAX_FIX_ITERATIONS):
+    for attempt in range(MAX_FIX_ITERATIONS):
+        progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
         critique = review(page, itinerary)
         if "no issues" in critique.lower() or "everything passes" in critique.lower():
             break
+        progress("Taisomos peržiūroje rastos problemos...")
         itinerary = fix(itinerary, critique)
         logistics_report = validate(itinerary)
         page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images})
 
+    progress("Repozitorijos kūrimas ir puslapio publikavimas...")
     repo_name = _slugify(requirements)
     deploy_log = run_cicd(
         owner=os.environ.get("GITHUB_OWNER", "sauliusc"),
