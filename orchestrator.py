@@ -70,12 +70,16 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
 
     progress("Nuotraukų paieška...")
     images = run_images(itinerary)
+    # run_page_designer's context gets json.dumps'd, which can't serialize a
+    # Pydantic model directly -- pass the plain-dict form there, keep the
+    # typed ImageResults for run_cicd (which needs .images/.license, not a dict).
+    images_for_page = images.model_dump()
 
     progress("Biudžeto skaičiavimas...")
     budget = run_budget({"itinerary": itinerary, "accommodation": accommodation})
 
     progress("Puslapio generavimas...")
-    page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images})
+    page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
 
     for attempt in range(MAX_FIX_ITERATIONS):
         progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
@@ -85,7 +89,7 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
         progress("Taisomos peržiūroje rastos problemos...")
         itinerary = fix(itinerary, critique)
         logistics_report = validate(itinerary)
-        page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images})
+        page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
 
     progress("Repozitorijos kūrimas ir puslapio publikavimas...")
     repo_name = _slugify(requirements)
@@ -94,7 +98,7 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
         repo_name=repo_name,
         description=f"{requirements.destination} trip page",
         page_html=page,
-        images_summary=images,
+        images=images,
     )
     print(deploy_log)
     return page

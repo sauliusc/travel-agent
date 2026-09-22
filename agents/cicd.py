@@ -7,14 +7,40 @@ tools/github.py functions directly rather than going through the Tool Runner.
 
 from pathlib import Path
 
+from schemas.images import ImageResults
 from tools.github import create_repo, enable_pages, push_file, trigger_workflow
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 WORKFLOW_FILES = ["auto-merge.yml", "deploy.yml", "fetch-images.yml"]
 
+# Only these license families are safe to redistribute via the generated
+# fetch-images.yml -- matches the Image agent's own prompt instructions, but
+# enforced again here since this is the step that actually ships the files.
+_ALLOWED_LICENSE_PREFIXES = ("cc by", "cc-by", "public domain", "cc0")
 
-def deploy(owner: str, repo_name: str, description: str, page_html: str, images_summary: str) -> str:
+
+def _render_files_list(images: ImageResults) -> str:
+    accepted = []
+    skipped = []
+    for img in images.images:
+        if img.license.strip().lower().startswith(_ALLOWED_LICENSE_PREFIXES):
+            accepted.append(img)
+        else:
+            skipped.append(img)
+
+    lines = [
+        f"            ('{img.local_path}', '{img.commons_filename}'),  # {img.stop_name}"
+        for img in accepted
+    ]
+    if skipped:
+        lines.append("            # Skipped (license not in the allowed set):")
+        for img in skipped:
+            lines.append(f"            # {img.stop_name}: {img.commons_filename} ({img.license})")
+    return "\n".join(lines)
+
+
+def deploy(owner: str, repo_name: str, description: str, page_html: str, images: ImageResults) -> str:
     """Create a repo, push the page + workflows, enable Pages, trigger image fetch.
 
     Args:
@@ -22,9 +48,8 @@ def deploy(owner: str, repo_name: str, description: str, page_html: str, images_
         repo_name: repository name, e.g. "albania-3days-trip-v2"
         description: repository description
         page_html: the complete index.html content from the Page Designer agent
-        images_summary: the Image agent's raw output (Commons file titles found
-            per stop). Not yet parsed into the fetch-images.yml file list —
-            embedded as a comment for now (see NOTE below and issue #14 follow-up).
+        images: structured Image agent output (agents/images.py), rendered
+            directly into fetch-images.yml's files = [...] list
     """
     log = [create_repo(name=repo_name, description=description, private=True)]
 
@@ -45,13 +70,8 @@ def deploy(owner: str, repo_name: str, description: str, page_html: str, images_
         )
     )
     fetch_images_template = (TEMPLATES_DIR / "fetch-images.yml").read_text()
-    # NOTE: images_summary is currently free text from the Image agent, not a
-    # structured (local_path, commons_filename) list — this embeds it as a
-    # comment so a human (or a future structured-output pass on the Image
-    # agent) can fill in the `files = [...]` list. Not yet auto-populated.
-    commented_summary = "\n".join(f"          # {line}" for line in images_summary.splitlines())
     fetch_images_yml = fetch_images_template.replace(
-        "# IMAGES_PLACEHOLDER", f"# TODO: fill in from Image agent output below\n{commented_summary}"
+        "# IMAGES_PLACEHOLDER", _render_files_list(images)
     )
     log.append(
         push_file(
