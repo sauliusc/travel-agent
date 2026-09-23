@@ -30,7 +30,7 @@ def _slugify(requirements) -> str:
     return f"{REPO_PREFIX}{slug}"
 
 
-def run_travel_planner(user_requirements: str, on_progress=None) -> str:
+def run_travel_planner(user_requirements: str, on_progress=None, on_stage_complete=None) -> str:
     """Run the full pipeline for one trip request and return the final page HTML.
 
     Args:
@@ -40,33 +40,45 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
             can itself take a while (real reasoning, real subscription
             usage), so without this the caller sees nothing at all between
             "started" and "finished", which looks identical to hung.
+        on_stage_complete: optional callable(stage_name: str, output: str)
+            invoked right after each stage produces its (string) output, so
+            a caller can persist it for later inspection/rerun without
+            re-running the whole pipeline.
     """
     progress = on_progress or (lambda _msg: None)
+    stage_done = on_stage_complete or (lambda _stage, _output: None)
 
     progress("Reikalavimų analizė...")
     requirements = run_requirements_analyst(user_requirements)
     requirements_json = requirements.model_dump_json()
+    stage_done("requirements", requirements_json)
 
     progress("Tyrimas (kelionės objektai, keliai, sezoniškumas)...")
     research = run_research(requirements_json)
+    stage_done("research", research)
 
     progress("Orų/sezono patikra...")
     weather = run_weather(requirements_json)
+    stage_done("weather", weather)
 
     progress("Nakvynės paieška...")
     accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
+    stage_done("accommodation", accommodation)
 
     progress("Dienų plano sudarymas...")
     itinerary = plan(
         f"requirements={requirements_json}\nresearch={research}\n"
         f"weather={weather}\naccommodation={accommodation}"
     )
+    stage_done("itinerary", itinerary)
 
     progress("Logistikos patikra (važiavimo laikai, keliai)...")
     logistics_report = validate(itinerary)
+    stage_done("logistics_report", logistics_report)
 
     progress("Žemėlapio duomenų ruošimas...")
     map_data = run_map(itinerary)
+    stage_done("map_data", map_data)
 
     progress("Nuotraukų paieška...")
     images = run_images(itinerary)
@@ -74,12 +86,15 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
     # Pydantic model directly -- pass the plain-dict form there, keep the
     # typed ImageResults for run_cicd (which needs .images/.license, not a dict).
     images_for_page = images.model_dump()
+    stage_done("images", images.model_dump_json())
 
     progress("Biudžeto skaičiavimas...")
     budget = run_budget({"itinerary": itinerary, "accommodation": accommodation})
+    stage_done("budget", budget)
 
     progress("Puslapio generavimas...")
     page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
+    stage_done("page", page)
 
     for attempt in range(MAX_FIX_ITERATIONS):
         progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
@@ -88,8 +103,11 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
             break
         progress("Taisomos peržiūroje rastos problemos...")
         itinerary = fix(itinerary, critique)
+        stage_done("itinerary", itinerary)
         logistics_report = validate(itinerary)
+        stage_done("logistics_report", logistics_report)
         page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
+        stage_done("page", page)
 
     progress("Repozitorijos kūrimas ir puslapio publikavimas...")
     repo_name = _slugify(requirements)
@@ -100,6 +118,7 @@ def run_travel_planner(user_requirements: str, on_progress=None) -> str:
         page_html=page,
         images=images,
     )
+    stage_done("deploy_log", deploy_log)
     print(deploy_log)
     return page
 
