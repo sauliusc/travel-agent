@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS trip_events (
     level TEXT NOT NULL DEFAULT 'info',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS trip_stages (
+    trip_id TEXT NOT NULL REFERENCES trips(id),
+    stage TEXT NOT NULL,
+    output TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (trip_id, stage)
+);
 """
 
 # Columns added after the initial release. CREATE TABLE IF NOT EXISTS is a
@@ -106,7 +114,32 @@ def get_trip(trip_id: str) -> sqlite3.Row | None:
 def delete_trip(trip_id: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM trip_events WHERE trip_id = ?", (trip_id,))
+        conn.execute("DELETE FROM trip_stages WHERE trip_id = ?", (trip_id,))
         conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+
+
+def save_stage_output(trip_id: str, stage: str, output: str) -> None:
+    """Persist one pipeline stage's raw (string) output for a trip.
+
+    Overwrites any previous value for the same (trip_id, stage) -- a rerun
+    of that stage replaces it rather than accumulating history, since the
+    point is "what should downstream stages use as input now."
+    """
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO trip_stages (trip_id, stage, output) VALUES (?, ?, ?) "
+            "ON CONFLICT (trip_id, stage) DO UPDATE SET output = excluded.output, "
+            "created_at = datetime('now')",
+            (trip_id, stage, output),
+        )
+
+
+def get_stage_outputs(trip_id: str) -> dict[str, str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT stage, output FROM trip_stages WHERE trip_id = ?", (trip_id,)
+        ).fetchall()
+    return {row["stage"]: row["output"] for row in rows}
 
 
 def get_events(trip_id: str) -> list[sqlite3.Row]:
