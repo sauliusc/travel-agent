@@ -1,5 +1,5 @@
-"""CI/CD agent: creates the trip's GitHub repository, pushes the page and
-workflows, enables Pages, and triggers the image-fetch workflow.
+"""CI/CD agent: creates the trip's GitHub repository, pushes the page, its
+verified images and workflows, and enables Pages.
 
 This is deterministic plumbing (not model reasoning), so it calls the
 tools/github.py functions directly rather than going through the Tool Runner.
@@ -8,82 +8,49 @@ tools/github.py functions directly rather than going through the Tool Runner.
 from pathlib import Path
 
 from schemas.images import ImageResults
-from tools.github import create_repo, enable_pages, push_file, trigger_workflow
+from tools.github import create_repo, enable_pages, push_file
+from tools.image_download import cache_path
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
-WORKFLOW_FILES = ["auto-merge.yml", "deploy.yml", "fetch-images.yml"]
-
-# Only these license families are safe to redistribute via the generated
-# fetch-images.yml -- matches the Image agent's own prompt instructions, but
-# enforced again here since this is the step that actually ships the files.
-_ALLOWED_LICENSE_PREFIXES = ("cc by", "cc-by", "public domain", "cc0")
-
-
-def _render_files_list(images: ImageResults) -> str:
-    accepted = []
-    skipped = []
-    for img in images.images:
-        if img.license.strip().lower().startswith(_ALLOWED_LICENSE_PREFIXES):
-            accepted.append(img)
-        else:
-            skipped.append(img)
-
-    lines = [
-        f"            ('{img.local_path}', '{img.commons_filename}'),  # {img.stop_name}"
-        for img in accepted
-    ]
-    if skipped:
-        lines.append("            # Skipped (license not in the allowed set):")
-        for img in skipped:
-            lines.append(f"            # {img.stop_name}: {img.commons_filename} ({img.license})")
-    return "\n".join(lines)
+WORKFLOW_FILES = ["auto-merge.yml", "deploy.yml"]
 
 
 def deploy(owner: str, repo_name: str, description: str, page_html: str, images: ImageResults) -> str:
-    """Create a repo, push the page + workflows, enable Pages, trigger image fetch.
+    """Create a repo, push images + workflows + the page, and enable Pages.
 
     Args:
         owner: GitHub account/org to create the repo under
-        repo_name: repository name, e.g. "albania-3days-trip-v2"
+        repo_name: repository name, e.g. "ai-trip-albania-roundtrip"
         description: repository description
         page_html: the complete index.html content from the Page Designer agent
-        images: structured Image agent output (agents/images.py), rendered
-            directly into fetch-images.yml's files = [...] list
+        images: verified manifest from tools/image_download.py; each entry's
+            bytes are read from the local image cache and pushed at local_path
     """
     # public: GitHub Pages needs a public repo (without GitHub Enterprise),
     # and every trip repo this pipeline creates is meant to be served via
     # Pages right after this function's enable_pages() call below.
     log = [create_repo(name=repo_name, description=description, private=False)]
 
-    log.append(push_file(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: initial trip page"))
+    # Images and workflows first, index.html last: every push to main triggers
+    # deploy.yml, and the last push is the one whose build should win.
+    for img in images.images:
+        path = cache_path(img.local_path)
+        if not path.is_file():
+            log.append(f"Skipped {img.local_path}: not in local image cache ({path})")
+            continue
+        log.append(push_file(
+            owner=owner, repo=repo_name, path=img.local_path, content=path.read_bytes(),
+            message=f"chore: nuotrauka {img.stop_name}",
+        ))
 
-    auto_merge_yml = (TEMPLATES_DIR / "auto-merge.yml").read_text()
-    deploy_yml = (TEMPLATES_DIR / "deploy.yml").read_text()
-    log.append(
-        push_file(
-            owner=owner, repo=repo_name, path=".github/workflows/auto-merge.yml",
-            content=auto_merge_yml, message="chore: auto-merge workflow",
-        )
-    )
-    log.append(
-        push_file(
-            owner=owner, repo=repo_name, path=".github/workflows/deploy.yml",
-            content=deploy_yml, message="chore: deploy workflow",
-        )
-    )
-    fetch_images_template = (TEMPLATES_DIR / "fetch-images.yml").read_text()
-    fetch_images_yml = fetch_images_template.replace(
-        "# IMAGES_PLACEHOLDER", _render_files_list(images)
-    )
-    log.append(
-        push_file(
-            owner=owner, repo=repo_name, path=".github/workflows/fetch-images.yml",
-            content=fetch_images_yml, message="chore: fetch-images workflow",
-        )
-    )
+    for workflow in WORKFLOW_FILES:
+        log.append(push_file(
+            owner=owner, repo=repo_name, path=f".github/workflows/{workflow}",
+            content=(TEMPLATES_DIR / workflow).read_text(), message=f"chore: {workflow}",
+        ))
 
     log.append(enable_pages(owner=owner, repo=repo_name))
-    log.append(trigger_workflow(owner=owner, repo=repo_name, workflow_file="fetch-images.yml"))
+    log.append(push_file(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: trip page"))
 
     return "\n".join(log)

@@ -1,5 +1,5 @@
 """GitHub REST API helpers for the CI/CD agent: create a repo, push files,
-enable Pages, and trigger a workflow.
+enable Pages.
 
 Requires a fine-grained personal access token with Contents, Pull requests,
 Workflows, and Pages read/write permissions, passed via the GITHUB_TOKEN
@@ -47,18 +47,19 @@ def create_repo(name: str, description: str = "", private: bool = False) -> str:
     return f"Created {data['full_name']} at {data['html_url']}"
 
 
-def push_file(owner: str, repo: str, path: str, content: str, message: str, branch: str = "main") -> str:
+def push_file(owner: str, repo: str, path: str, content: str | bytes, message: str, branch: str = "main") -> str:
     """Create or update a single file in a repository via the Contents API.
 
     Args:
         owner: repository owner
         repo: repository name
         path: file path within the repo, e.g. "index.html"
-        content: full file content (text)
+        content: full file content (text, or bytes for binary files like images)
         message: commit message
         branch: target branch (default "main")
     """
-    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    raw = content.encode("utf-8") if isinstance(content, str) else content
+    encoded = base64.b64encode(raw).decode("ascii")
 
     # Look up the existing file's SHA (needed to update, not needed to create).
     get_resp = httpx.get(
@@ -101,22 +102,3 @@ def enable_pages(owner: str, repo: str) -> str:
         return f"Failed to enable Pages: {resp.status_code} {resp.text}"
     return f"Pages enabled for {owner}/{repo}: https://{owner}.github.io/{repo}/"
 
-
-def trigger_workflow(owner: str, repo: str, workflow_file: str, ref: str = "main") -> str:
-    """Trigger a workflow_dispatch run for a given workflow file.
-
-    Args:
-        owner: repository owner
-        repo: repository name
-        workflow_file: workflow filename, e.g. "fetch-images.yml"
-        ref: branch to run the workflow on (default "main")
-    """
-    resp = httpx.post(
-        f"{API_URL}/repos/{owner}/{repo}/actions/workflows/{workflow_file}/dispatches",
-        headers=_headers(),
-        json={"ref": ref},
-        timeout=30,
-    )
-    if resp.status_code >= 400:
-        return f"Failed to trigger {workflow_file}: {resp.status_code} {resp.text}"
-    return f"Triggered {workflow_file} on {owner}/{repo}@{ref}"

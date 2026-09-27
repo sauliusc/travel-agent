@@ -7,3 +7,4 @@ venv/
 console.db
 .pytest_cache/
 .DS_Store
+image_cache/

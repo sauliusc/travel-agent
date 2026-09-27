@@ -23,6 +23,7 @@ from agents.research import research as run_research
 from agents.weather import check as run_weather
 from schemas.images import ImageResults
 from schemas.requirements import TripRequirements
+from tools.image_download import download_images
 
 REPO_PREFIX = "ai-trip-"
 
@@ -169,7 +170,11 @@ def run_from_stage(
     if reached("images"):
         progress("Nuotraukų paieška...")
         with log_calls("images", on_llm_call):
-            images = run_images(itinerary)
+            picks = run_images(itinerary)
+        progress("Nuotraukų atsisiuntimas ir licencijų patikra...")
+        images = download_images(picks)
+        if images.skipped:
+            progress(f"Praleista nuotraukų: {len(images.skipped)} ({'; '.join(f'{k}: {v}' for k, v in images.skipped.items())})")
         stage_done("images", images.model_dump_json())
     else:
         images = ImageResults.model_validate_json(cached_outputs["images"])
@@ -201,7 +206,7 @@ def run_from_stage(
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
             with log_calls("critic", on_llm_call):
-                critique = review(page, itinerary)
+                critique = review(page, itinerary, images.model_dump_json())
             if "no issues" in critique.lower() or "everything passes" in critique.lower():
                 break
             progress("Taisomos peržiūroje rastos problemos...")

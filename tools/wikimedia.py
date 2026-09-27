@@ -6,6 +6,7 @@ agent (running under Claude Code) can invoke it via the Bash tool:
 """
 
 import argparse
+import re
 
 import httpx
 
@@ -52,10 +53,12 @@ def find_image(query: str, min_width: int = 640) -> str:
 
         info = imageinfo[0]
         thumb_url = info.get("thumburl", info.get("url"))
-        license_name = info.get("extmetadata", {}).get("LicenseShortName", {}).get("value", "unknown")
+        meta = info.get("extmetadata", {})
+        license_name = meta.get("LicenseShortName", {}).get("value", "unknown")
+        author = re.sub(r"<[^>]+>", "", meta.get("Artist", {}).get("value", "unknown")).strip()
 
         return (
-            f"title={title} thumb_url={thumb_url} license={license_name} "
+            f"title={title} thumb_url={thumb_url} license={license_name} author={author} "
             f"page_url=https://commons.wikimedia.org/wiki/{title.replace(' ', '_')}"
         )
 
