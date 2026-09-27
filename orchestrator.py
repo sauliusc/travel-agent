@@ -9,6 +9,7 @@ import os
 import re
 
 from agents.accommodation import find as run_accommodation
+from agents.base import log_calls
 from agents.budget import estimate as run_budget
 from agents.cicd import deploy as run_cicd
 from agents.critic import MAX_FIX_ITERATIONS, review
@@ -54,6 +55,7 @@ def run_from_stage(
     cached_outputs: dict[str, str] | None = None,
     on_progress=None,
     on_stage_complete=None,
+    on_llm_call=None,
     modification: str | None = None,
     user_requirements: str | None = None,
 ) -> str:
@@ -72,6 +74,7 @@ def run_from_stage(
             for every stage strictly before `stage_name`
         on_progress: see run_travel_planner
         on_stage_complete: see run_travel_planner
+        on_llm_call: see run_travel_planner
         modification: optional free-text instruction applied only when
             `stage_name` is exactly "itinerary" -- routes through
             agents.itinerary.fix() against the cached itinerary instead of
@@ -99,7 +102,8 @@ def run_from_stage(
         if user_requirements is None:
             raise ValueError("user_requirements is required to (re)run the requirements stage")
         progress("Reikalavimų analizė...")
-        requirements = run_requirements_analyst(user_requirements)
+        with log_calls("requirements", on_llm_call):
+            requirements = run_requirements_analyst(user_requirements)
         requirements_json = requirements.model_dump_json()
         stage_done("requirements", requirements_json)
     else:
@@ -108,21 +112,24 @@ def run_from_stage(
 
     if reached("research"):
         progress("Tyrimas (kelionės objektai, keliai, sezoniškumas)...")
-        research = run_research(requirements_json)
+        with log_calls("research", on_llm_call):
+            research = run_research(requirements_json)
         stage_done("research", research)
     else:
         research = cached_outputs["research"]
 
     if reached("weather"):
         progress("Orų/sezono patikra...")
-        weather = run_weather(requirements_json)
+        with log_calls("weather", on_llm_call):
+            weather = run_weather(requirements_json)
         stage_done("weather", weather)
     else:
         weather = cached_outputs["weather"]
 
     if reached("accommodation"):
         progress("Nakvynės paieška...")
-        accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
+        with log_calls("accommodation", on_llm_call):
+            accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
         stage_done("accommodation", accommodation)
     else:
         accommodation = cached_outputs["accommodation"]
@@ -130,34 +137,39 @@ def run_from_stage(
     if reached("itinerary"):
         if modification is not None and stage_name == "itinerary":
             progress("Dienų plano koregavimas pagal nurodymą...")
-            itinerary = fix(cached_outputs["itinerary"], modification)
+            with log_calls("itinerary", on_llm_call):
+                itinerary = fix(cached_outputs["itinerary"], modification)
         else:
             progress("Dienų plano sudarymas...")
-            itinerary = plan(
-                f"requirements={requirements_json}\nresearch={research}\n"
-                f"weather={weather}\naccommodation={accommodation}"
-            )
+            with log_calls("itinerary", on_llm_call):
+                itinerary = plan(
+                    f"requirements={requirements_json}\nresearch={research}\n"
+                    f"weather={weather}\naccommodation={accommodation}"
+                )
         stage_done("itinerary", itinerary)
     else:
         itinerary = cached_outputs["itinerary"]
 
     if reached("logistics_report"):
         progress("Logistikos patikra (važiavimo laikai, keliai)...")
-        logistics_report = validate(itinerary)
+        with log_calls("logistics_report", on_llm_call):
+            logistics_report = validate(itinerary)
         stage_done("logistics_report", logistics_report)
     else:
         logistics_report = cached_outputs["logistics_report"]
 
     if reached("map_data"):
         progress("Žemėlapio duomenų ruošimas...")
-        map_data = run_map(itinerary)
+        with log_calls("map_data", on_llm_call):
+            map_data = run_map(itinerary)
         stage_done("map_data", map_data)
     else:
         map_data = cached_outputs["map_data"]
 
     if reached("images"):
         progress("Nuotraukų paieška...")
-        images = run_images(itinerary)
+        with log_calls("images", on_llm_call):
+            images = run_images(itinerary)
         stage_done("images", images.model_dump_json())
     else:
         images = ImageResults.model_validate_json(cached_outputs["images"])
@@ -168,7 +180,8 @@ def run_from_stage(
 
     if reached("budget"):
         progress("Biudžeto skaičiavimas...")
-        budget = run_budget({"itinerary": itinerary, "accommodation": accommodation})
+        with log_calls("budget", on_llm_call):
+            budget = run_budget({"itinerary": itinerary, "accommodation": accommodation})
         stage_done("budget", budget)
     else:
         budget = cached_outputs["budget"]
@@ -176,7 +189,8 @@ def run_from_stage(
     page_freshly_built = reached("page")
     if page_freshly_built:
         progress("Puslapio generavimas...")
-        page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
+        with log_calls("page", on_llm_call):
+            page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
         stage_done("page", page)
     else:
         page = cached_outputs["page"]
@@ -186,15 +200,19 @@ def run_from_stage(
     if page_freshly_built:
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
-            critique = review(page, itinerary)
+            with log_calls("critic", on_llm_call):
+                critique = review(page, itinerary)
             if "no issues" in critique.lower() or "everything passes" in critique.lower():
                 break
             progress("Taisomos peržiūroje rastos problemos...")
-            itinerary = fix(itinerary, critique)
+            with log_calls("itinerary", on_llm_call):
+                itinerary = fix(itinerary, critique)
             stage_done("itinerary", itinerary)
-            logistics_report = validate(itinerary)
+            with log_calls("logistics_report", on_llm_call):
+                logistics_report = validate(itinerary)
             stage_done("logistics_report", logistics_report)
-            page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
+            with log_calls("page", on_llm_call):
+                page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
             stage_done("page", page)
 
     progress("Repozitorijos kūrimas ir puslapio publikavimas...")
@@ -211,7 +229,7 @@ def run_from_stage(
     return page
 
 
-def run_travel_planner(user_requirements: str, on_progress=None, on_stage_complete=None) -> str:
+def run_travel_planner(user_requirements: str, on_progress=None, on_stage_complete=None, on_llm_call=None) -> str:
     """Run the full pipeline for one trip request and return the final page HTML.
 
     Args:
@@ -225,11 +243,18 @@ def run_travel_planner(user_requirements: str, on_progress=None, on_stage_comple
             invoked right after each stage produces its (string) output, so
             a caller can persist it for later inspection/rerun without
             re-running the whole pipeline.
+        on_llm_call: optional callable(stage_name: str, query: str,
+            response: str) invoked after every real `claude -p` call
+            (system prompt + input as `query`, raw CLI JSON as `response`)
+            -- lets a caller persist the actual agent conversation for
+            inspection, without needing to grep `ps aux`/journalctl on the
+            machine the pipeline runs on.
     """
     return run_from_stage(
         "requirements",
         on_progress=on_progress,
         on_stage_complete=on_stage_complete,
+        on_llm_call=on_llm_call,
         user_requirements=user_requirements,
     )
 

@@ -31,6 +31,21 @@ CREATE TABLE IF NOT EXISTS trip_stages (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (trip_id, stage)
 );
+
+-- Every real `claude -p` query+response, append-only (unlike trip_stages,
+-- which only keeps the latest output per stage) -- a stage can invoke
+-- claude more than once (e.g. the critic-fix loop calls itinerary/
+-- logistics_report/page repeatedly), and each call is worth keeping so the
+-- admin panel can show exactly what was asked and answered without
+-- grepping `ps aux`/journalctl on the machine the pipeline runs on.
+CREATE TABLE IF NOT EXISTS trip_agent_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id TEXT NOT NULL REFERENCES trips(id),
+    stage TEXT NOT NULL,
+    query TEXT NOT NULL,
+    response TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Columns added after the initial release. CREATE TABLE IF NOT EXISTS is a
@@ -120,6 +135,7 @@ def delete_trip(trip_id: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM trip_events WHERE trip_id = ?", (trip_id,))
         conn.execute("DELETE FROM trip_stages WHERE trip_id = ?", (trip_id,))
+        conn.execute("DELETE FROM trip_agent_calls WHERE trip_id = ?", (trip_id,))
         conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
 
 
@@ -152,3 +168,47 @@ def get_events(trip_id: str) -> list[sqlite3.Row]:
         return conn.execute(
             "SELECT * FROM trip_events WHERE trip_id = ? ORDER BY id ASC", (trip_id,)
         ).fetchall()
+
+
+def save_agent_call(trip_id: str, stage: str, query: str, response: str) -> None:
+    """Append one real claude -p query+response for a trip's stage.
+
+    Append-only by design (see trip_agent_calls' schema comment) -- a stage
+    invoked multiple times (e.g. during the critic-fix loop) keeps every
+    call, not just the latest.
+    """
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO trip_agent_calls (trip_id, stage, query, response) VALUES (?, ?, ?, ?)",
+            (trip_id, stage, query, response),
+        )
+
+
+def get_agent_calls(trip_id: str, stage: str | None = None) -> list[sqlite3.Row]:
+    """All (or, given `stage`, just that stage's) agent calls for a trip, oldest first."""
+    with connect() as conn:
+        if stage is not None:
+            return conn.execute(
+                "SELECT * FROM trip_agent_calls WHERE trip_id = ? AND stage = ? ORDER BY id ASC",
+                (trip_id, stage),
+            ).fetchall()
+        return conn.execute(
+            "SELECT * FROM trip_agent_calls WHERE trip_id = ? ORDER BY id ASC", (trip_id,)
+        ).fetchall()
+
+
+def get_call_stage_summary(trip_id: str) -> list[dict]:
+    """Distinct stages with recorded calls for a trip, in first-call order,
+    each with its call count -- drives the console UI's one-collapsible-
+    item-per-stage list. Includes "critic", which has its own calls but
+    isn't a trip_stages/STAGE_ORDER entry (its output isn't cached/rerun
+    from directly), so this is a superset of get_stage_outputs()'s keys.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT stage, COUNT(*) as count, MIN(id) as first_id "
+            "FROM trip_agent_calls WHERE trip_id = ? "
+            "GROUP BY stage ORDER BY first_id ASC",
+            (trip_id,),
+        ).fetchall()
+    return [{"stage": row["stage"], "count": row["count"]} for row in rows]
