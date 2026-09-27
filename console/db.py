@@ -83,19 +83,24 @@ def add_event(trip_id: str, message: str, level: str = "info") -> None:
 
 
 def set_status(trip_id: str, status: str, page_url: str | None = None) -> None:
+    # finished_at must be cleared (not just left alone) when a trip moves
+    # back to "running"/"queued" -- e.g. a step rerun or modify on a
+    # previously done/failed trip -- otherwise the UI keeps showing a stale
+    # finished timestamp from the trip's earlier run while it's actively
+    # running again.
     finished = status in ("done", "failed")
     with connect() as conn:
         if page_url is not None:
             conn.execute(
                 "UPDATE trips SET status = ?, page_url = ?, "
-                "finished_at = CASE WHEN ? THEN datetime('now') ELSE finished_at END "
+                "finished_at = CASE WHEN ? THEN datetime('now') ELSE NULL END "
                 "WHERE id = ?",
                 (status, page_url, finished, trip_id),
             )
         else:
             conn.execute(
                 "UPDATE trips SET status = ?, "
-                "finished_at = CASE WHEN ? THEN datetime('now') ELSE finished_at END "
+                "finished_at = CASE WHEN ? THEN datetime('now') ELSE NULL END "
                 "WHERE id = ?",
                 (status, finished, trip_id),
             )

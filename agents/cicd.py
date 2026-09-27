@@ -51,7 +51,10 @@ def deploy(owner: str, repo_name: str, description: str, page_html: str, images:
         images: structured Image agent output (agents/images.py), rendered
             directly into fetch-images.yml's files = [...] list
     """
-    log = [create_repo(name=repo_name, description=description, private=True)]
+    # public: GitHub Pages needs a public repo (without GitHub Enterprise),
+    # and every trip repo this pipeline creates is meant to be served via
+    # Pages right after this function's enable_pages() call below.
+    log = [create_repo(name=repo_name, description=description, private=False)]
 
     log.append(push_file(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: initial trip page"))
 

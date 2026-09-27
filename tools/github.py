@@ -23,13 +23,17 @@ def _headers() -> dict:
     }
 
 
-def create_repo(name: str, description: str = "", private: bool = True) -> str:
+def create_repo(name: str, description: str = "", private: bool = False) -> str:
     """Create a new GitHub repository under the authenticated user's account.
 
     Args:
         name: repository name, e.g. "albania-3days-trip-v2"
         description: short repository description
-        private: whether the repo should be private (default True)
+        private: whether the repo should be private (default False) -- GitHub
+            Pages requires a public repo unless the account is on GitHub
+            Enterprise, and every trip repo this pipeline creates is meant
+            to be published via Pages (see agents/cicd.py's enable_pages
+            call), so private repos would silently fail to serve the page.
     """
     resp = httpx.post(
         f"{API_URL}/user/repos",
