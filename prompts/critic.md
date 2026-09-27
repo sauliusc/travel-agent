@@ -12,7 +12,11 @@ Check, in order:
    flight?
 4. Do the map's coordinates for each stop match the text description (no obvious
    mismatches, e.g. a "Vlorë" stop plotted at Durrës's coordinates)?
-5. Are all image licenses usable (no missing/incompatible license)?
+5. Images: you receive the verified image manifest. Every file in it was downloaded by
+   the pipeline and will ship with the page (do not look for them on this machine's
+   filesystem). Check that the page only references `local_path` values from the
+   manifest, that every photo shows author + license + source link, and that licenses are
+   open (public domain / CC0 / CC BY / CC BY-SA). A stop without a photo is fine.
 6. Do Google Maps links resolve to the correct coordinates (spot-check the URL format)?
 
 For each issue found, name the exact agent/output responsible and what needs to change —

@@ -1,9 +1,8 @@
 """Image agent: finds a Wikimedia Commons photo for every stop in the itinerary.
 
 Uses `claude -p --json-schema` (same pattern as agents/requirements.py) so
-the result is a structured ImageResults list agents/cicd.py can render
-directly into fetch-images.yml's file list, instead of the free-text
-summary the CI/CD agent previously had to embed as an unfilled comment.
+the result is a structured ImageResults list. The agent only chooses images;
+tools/image_download.py then downloads and verifies them deterministically.
 """
 
 import json
