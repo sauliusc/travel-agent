@@ -72,6 +72,7 @@ def _run_pipeline(
             cached_outputs=cached_outputs,
             on_progress=log,
             on_stage_complete=lambda stage, output: db.save_stage_output(trip_id, stage, output),
+            on_llm_call=lambda stage, query, response: db.save_agent_call(trip_id, stage, query, response),
             modification=modification,
             user_requirements=requirements_text,
         )
@@ -229,4 +230,22 @@ def trip_detail(trip_id: str):
         # Which stages have a persisted output to rerun from -- in pipeline
         # order, so the UI can offer "Perleisti nuo čia" per completed stage.
         "completed_stages": [s for s in STAGE_ORDER if s in stage_outputs],
+        # Every stage that has made at least one real claude -p call (a
+        # superset of completed_stages -- includes "critic", and includes a
+        # stage that's mid-run with no persisted output yet) -- drives the
+        # collapsible per-stage call log in the UI.
+        "call_stages": db.get_call_stage_summary(trip_id),
     }
+
+
+@app.get("/trips/{trip_id}/stages/{stage}/calls")
+def trip_stage_calls(trip_id: str, stage: str):
+    """The full query+response of every real claude -p call made for one
+    stage of one trip -- fetched on demand when a UI stage item is
+    expanded, so the admin panel is the source of truth for "what was
+    asked and answered" instead of journalctl/ps aux on the host.
+    """
+    if db.get_trip(trip_id) is None:
+        raise HTTPException(404, "Trip not found")
+    calls = db.get_agent_calls(trip_id, stage=stage)
+    return [dict(row) for row in calls]

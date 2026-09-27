@@ -72,6 +72,31 @@
   .modify-row input[type=text] { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 13px; font-family: inherit; }
   .modify-row button { flex-shrink: 0; }
 
+  #detail-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+  #detail-calllog { flex: 1.4; overflow-y: auto; padding: 12px 24px; border-bottom: 1px solid var(--border); min-height: 0; }
+  .calllog-empty { color: var(--text-dim); font-size: 13px; padding: 8px 0; }
+  .stage-list { display: flex; flex-direction: column; gap: 6px; }
+  details.stage-item { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+  details.stage-item > summary { list-style: none; cursor: pointer; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+  details.stage-item > summary::-webkit-details-marker { display: none; }
+  details.stage-item > summary::before { content: '▸'; color: var(--text-dim); margin-right: 8px; display: inline-block; transition: transform 0.15s; }
+  details.stage-item[open] > summary::before { transform: rotate(90deg); }
+  .stage-name { font-weight: 600; }
+  .stage-count { color: var(--text-dim); font-size: 11px; }
+  .stage-calls { padding: 4px 12px 12px; }
+  .call-item { border-top: 1px solid var(--border); padding: 10px 0; }
+  .call-item:first-child { border-top: none; }
+  .call-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  details.call-block { margin-top: 4px; }
+  details.call-block > summary { cursor: pointer; font-size: 12px; color: var(--text-dim); padding: 2px 0; }
+  details.call-block > summary:hover { color: var(--text); }
+  details.call-block pre {
+    margin: 6px 0 0; padding: 10px; background: #0b0d11; border-radius: 6px; border: 1px solid var(--border);
+    max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--text);
+  }
+
   #log { flex: 1; overflow-y: auto; padding: 16px 24px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; line-height: 1.7; background: #0b0d11; }
   .log-line { padding: 2px 0; white-space: pre-wrap; word-break: break-word; }
   .log-line.error { color: var(--err); }
@@ -119,7 +144,10 @@
         <div id="detail-stages"></div>
         <div id="detail-modify"></div>
       </div>
-      <div id="log"></div>
+      <div id="detail-body">
+        <div id="detail-calllog"></div>
+        <div id="log"></div>
+      </div>
     </div>
   </main>
 
@@ -228,6 +256,116 @@ function renderDetailHeader(trip) {
 
   renderStagePanel(trip);
   renderModifyBox(trip);
+  syncCallLogPanel(trip);
+}
+
+// Renders one collapsible item per pipeline stage that has made at least
+// one real `claude -p` call (trip.call_stages, a superset of
+// completed_stages that also includes "critic"). Expanding an item lazy-
+// loads that stage's full query+response history from
+// /trips/{id}/stages/{stage}/calls -- the point being that watching a
+// trip run should never require grepping `ps aux`/journalctl on the host.
+// Incremental (not a full rebuild) so re-syncing during a live run doesn't
+// collapse an item the viewer has open or discard an already-loaded one
+// unless its call count actually changed.
+function syncCallLogPanel(trip) {
+  const panel = document.getElementById('detail-calllog');
+  const stages = trip.call_stages || [];
+  if (!stages.length) {
+    if (!panel.querySelector('.stage-list')) {
+      panel.innerHTML = '<div class="calllog-empty">Dar nėra užklausų šiai kelionei.</div>';
+    }
+    return;
+  }
+  let list = panel.querySelector('.stage-list');
+  if (!list) {
+    panel.innerHTML = '';
+    list = document.createElement('div');
+    list.className = 'stage-list';
+    panel.appendChild(list);
+  }
+  stages.forEach(({ stage, count }) => {
+    let item = list.querySelector(`details[data-stage="${CSS.escape(stage)}"]`);
+    if (!item) {
+      item = document.createElement('details');
+      item.className = 'stage-item';
+      item.dataset.stage = stage;
+      item.dataset.tripId = trip.id;
+      item.dataset.loaded = 'false';
+      item.dataset.count = '0';
+      const summary = document.createElement('summary');
+      item.appendChild(summary);
+      const body = document.createElement('div');
+      body.className = 'stage-calls';
+      body.textContent = 'Spausk, kad peržiūrėtum užklausas ir atsakymus...';
+      item.appendChild(body);
+      item.addEventListener('toggle', () => { if (item.open) loadStageCalls(item); });
+      list.appendChild(item);
+    }
+    const summary = item.querySelector('summary');
+    summary.innerHTML = `<span class="stage-name">${STAGE_LABELS[stage] || stage}</span>`
+      + `<span class="stage-count">${count} ${count === 1 ? 'užklausa' : 'užklausos'}</span>`;
+    if (String(count) !== item.dataset.count) {
+      item.dataset.count = String(count);
+      item.dataset.loaded = 'false';
+      if (item.open) loadStageCalls(item);
+    }
+  });
+}
+
+async function loadStageCalls(item) {
+  if (item.dataset.loaded === 'true') return;
+  item.dataset.loaded = 'true';
+  const body = item.querySelector('.stage-calls');
+  body.textContent = 'Kraunama...';
+  const tripId = item.dataset.tripId;
+  const stage = item.dataset.stage;
+  let calls;
+  try {
+    const res = await fetch('/trips/' + tripId + '/stages/' + encodeURIComponent(stage) + '/calls');
+    calls = await res.json();
+  } catch (e) {
+    body.textContent = 'Nepavyko įkelti: ' + e;
+    item.dataset.loaded = 'false';
+    return;
+  }
+  body.innerHTML = '';
+  if (!calls.length) {
+    body.textContent = 'Šiam žingsniui dar nėra užklausų.';
+    return;
+  }
+  calls.forEach((call, i) => {
+    const entry = document.createElement('div');
+    entry.className = 'call-item';
+
+    const meta = document.createElement('div');
+    meta.className = 'call-meta';
+    meta.textContent = `#${i + 1} · ${fmtTime(call.created_at)}`;
+    entry.appendChild(meta);
+
+    const q = document.createElement('details');
+    q.className = 'call-block';
+    const qs = document.createElement('summary');
+    qs.textContent = 'Užklausa (query)';
+    const qpre = document.createElement('pre');
+    qpre.textContent = call.query;
+    q.appendChild(qs);
+    q.appendChild(qpre);
+    entry.appendChild(q);
+
+    const r = document.createElement('details');
+    r.className = 'call-block';
+    r.open = true;
+    const rs = document.createElement('summary');
+    rs.textContent = 'Atsakymas (response)';
+    const rpre = document.createElement('pre');
+    rpre.textContent = call.response;
+    r.appendChild(rs);
+    r.appendChild(rpre);
+    entry.appendChild(r);
+
+    body.appendChild(entry);
+  });
 }
 
 function renderStagePanel(trip) {
@@ -275,6 +413,11 @@ function streamLive(tripId) {
     if (e.data === 'Baigta.' || isError) {
       fetch('/trips/' + tripId).then(r => r.json()).then(renderDetailHeader);
       htmx.trigger('#trip-list', 'load');
+    } else if (tripId === currentTripId) {
+      // Each progress line means a stage just started or finished -- refresh
+      // the collapsible stage list (call counts, newly appeared stages) so
+      // it reflects the run live, not only once it's done/failed.
+      fetch('/trips/' + tripId).then(r => r.json()).then(syncCallLogPanel);
     }
   };
   es.onerror = () => { es.close(); if (currentEventSource === es) currentEventSource = null; };

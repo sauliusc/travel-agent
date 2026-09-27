@@ -14,13 +14,47 @@ there is no Python-side tool-calling API here, unlike the old
 Anthropic-SDK-based version.
 """
 
+import contextvars
 import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 DEFAULT_TIMEOUT = 600  # seconds
+
+# Set by orchestrator.py (via log_calls()) around each stage's agent call so
+# every real `claude -p` query+response can be persisted to the console DB
+# (console/db.py's trip_agent_calls) instead of only being visible by
+# grepping `ps aux`/journalctl on the box the pipeline runs on.
+_call_sink: contextvars.ContextVar = contextvars.ContextVar("_call_sink", default=None)
+
+
+class _CallSink:
+    __slots__ = ("stage", "on_llm_call")
+
+    def __init__(self, stage: str, on_llm_call):
+        self.stage = stage
+        self.on_llm_call = on_llm_call
+
+
+@contextmanager
+def log_calls(stage: str, on_llm_call=None):
+    """While active, every _invoke_claude() call reports its query+raw
+    response to on_llm_call(stage, query, response_text).
+
+    A no-op (no context set) when on_llm_call is None, so this is safe to
+    wrap around every call site unconditionally.
+    """
+    if on_llm_call is None:
+        yield
+        return
+    token = _call_sink.set(_CallSink(stage, on_llm_call))
+    try:
+        yield
+    finally:
+        _call_sink.reset(token)
 
 # Common install locations the official installer (claude.ai/install.sh) can
 # use, checked if a bare "claude" isn't resolved via PATH. This matters most
@@ -80,28 +114,52 @@ def _invoke_claude(
         "json",
         *(extra_args or []),
     ]
+
+    # What actually gets sent, formatted for a human reading it back later
+    # (the console UI) rather than for re-execution -- system prompt and
+    # user input are the two parts worth reading, the flags are secondary.
+    query = (
+        f"[system prompt]\n{system_prompt}\n\n"
+        f"[user input]\n{user_input}\n\n"
+        f"[cli] --allowedTools {','.join(allowed_tools)} --permission-mode {permission_mode}"
+        + (f" {' '.join(extra_args)}" if extra_args else "")
+    )
+
+    def _record(response_text: str) -> None:
+        sink = _call_sink.get()
+        if sink is not None:
+            sink.on_llm_call(sink.stage, query, response_text)
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as e:
+        _record("ERROR: 'claude' binary not found on PATH")
         raise ClaudeCLIError(
             "'claude' binary not found on PATH -- install Claude Code and run "
             "`claude auth login` (see docs/PROXMOX_SETUP.md)"
         ) from e
     except subprocess.TimeoutExpired as e:
+        _record(f"ERROR: claude did not finish within {timeout}s")
         raise ClaudeCLIError(f"claude did not finish within {timeout}s") from e
 
     if result.returncode != 0:
-        raise ClaudeCLIError(
-            f"claude exited {result.returncode}: "
-            f"{(result.stderr or result.stdout).strip()[:2000]}"
-        )
+        err_text = (result.stderr or result.stdout).strip()[:2000]
+        _record(f"ERROR: claude exited {result.returncode}: {err_text}")
+        raise ClaudeCLIError(f"claude exited {result.returncode}: {err_text}")
 
     try:
-        return json.loads(result.stdout)
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError as e:
+        _record(f"ERROR: claude returned non-JSON stdout: {result.stdout[:500]!r}")
         raise ClaudeCLIError(
             f"claude returned non-JSON stdout: {result.stdout[:500]!r}"
         ) from e
+
+    # Full raw JSON response (not just "result"), so a structured-output
+    # call (e.g. requirements.py, images.py) still shows something useful
+    # even when "result" itself is empty/absent.
+    _record(result.stdout)
+    return payload
 
 
 def run_agent(
