@@ -6,6 +6,10 @@ from agents.base import run_agent
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "logistics.md").read_text()
 
+# Per-leg OSRM + multi-point Overpass checks (with mirror fallback/backoff) can
+# exceed the 600s default on a multi-day trip.
+TIMEOUT = 1200
+
 TOOL_HINT = (
     "Use Bash to check each leg: `python3 tools/osrm.py --from-lat .. --from-lon .. "
     "--to-lat .. --to-lon ..` for driving distance/time, and "
@@ -20,4 +24,4 @@ def validate(itinerary_json: str) -> str:
         itinerary_json: JSON-serialized Itinerary (see schemas/itinerary.py)
     """
     task = f"{itinerary_json}\n\n{TOOL_HINT}"
-    return run_agent(SYSTEM_PROMPT, ["Bash"], task)
+    return run_agent(SYSTEM_PROMPT, ["Bash"], task, timeout=TIMEOUT)
