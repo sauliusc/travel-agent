@@ -21,7 +21,11 @@ Environment=HOME=/root
 # the `claude` binary -- confirmed on a real deployment, where `claude`
 # resolved fine in an interactive root shell (via .bashrc) but the
 # systemd service failed with "'claude' binary not found on PATH".
-Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The project venv comes first: agents run the custom tools as
+# `python3 tools/*.py` via Bash, and system python3 has no httpx -- on a real
+# deployment every tool call failed with ModuleNotFoundError and agents
+# silently improvised with curl instead of using the tools.
+Environment=PATH=/opt/travel-agent/.venv/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/travel-agent/.venv/bin/uvicorn console.app:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=3
