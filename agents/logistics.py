@@ -11,9 +11,12 @@ SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "logistics.md").read
 TIMEOUT = 1200
 
 TOOL_HINT = (
-    "Use Bash to check each leg: `python3 tools/osrm.py --from-lat .. --from-lon .. "
-    "--to-lat .. --to-lon ..` for driving distance/time, and "
-    "`python3 tools/overpass.py --lat .. --lon ..` to flag off-road segments."
+    "Check each leg with ONE call: `python3 tools/route_check.py --from-lat .. --from-lon .. "
+    "--to-lat .. --to-lon ..` -- it returns real distance/time and the road type at points "
+    "sampled along the actual route, ending in a `LEG OK` or `LEG WARNING` line. Run legs one "
+    "after another, not in parallel (Overpass rate-limits parallel requests). Do not call "
+    "OSRM/Overpass with curl yourself. `python3 tools/overpass.py --lat .. --lon ..` is only for "
+    "spot-checking one specific point."
 )
 
 

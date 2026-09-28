@@ -10,6 +10,7 @@ Callable both as a Python function and as a CLI script, so the agent
 """
 
 import argparse
+import math
 import time
 
 import httpx
@@ -68,54 +69,41 @@ RETRIES_PER_MIRROR = 2
 BACKOFF_SECONDS = 2
 
 
-def _query_mirror(url: str, query: str) -> httpx.Response:
-    last_exc = None
-    for attempt in range(RETRIES_PER_MIRROR):
-        try:
-            resp = httpx.post(url, data={"data": query}, headers=HEADERS, timeout=30)
-            resp.raise_for_status()
-            return resp
-        except httpx.HTTPStatusError as e:
-            last_exc = e
-            if e.response.status_code not in (406, 429, 500, 502, 503, 504):
-                raise  # not a transient/mirror-specific error, don't waste retries
-            time.sleep(BACKOFF_SECONDS * (attempt + 1))
-        except httpx.RequestError as e:
-            last_exc = e
-            time.sleep(BACKOFF_SECONDS * (attempt + 1))
-    raise last_exc
+# Overall budget per Overpass request across all mirrors and retries. Without
+# it, 3 mirrors x 2 retries x 30s could run past the agent's 120s Bash limit on
+# a single point (seen on a real run, where the Logistics Validator then timed
+# out at 1200s).
+DEADLINE_SECONDS = 90
 
 
-def road_type(lat: float, lon: float, radius_m: int = DEFAULT_RADIUS_M) -> str:
-    """Return the OSM highway type(s) found near a coordinate, flagging off-road tracks."""
-    query = f"""
-    [out:json][timeout:25];
-    way(around:{radius_m},{lat},{lon})["highway"];
-    out tags;
-    """
+def _post(query: str) -> dict:
+    """Run a query against the mirrors in order; raise RuntimeError listing every failure."""
     errors = []
-    resp = None
+    started = time.monotonic()
     for url in OVERPASS_URLS:
-        try:
-            resp = _query_mirror(url, query)
-            break
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            errors.append(f"{url}: {e}")
-            continue
+        for attempt in range(RETRIES_PER_MIRROR):
+            remaining = DEADLINE_SECONDS - (time.monotonic() - started)
+            if remaining <= 5:
+                errors.append("overall deadline reached")
+                raise RuntimeError("; ".join(errors))
+            try:
+                resp = httpx.post(url, data={"data": query}, headers=HEADERS, timeout=min(45, remaining))
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as e:
+                errors.append(f"{url}: HTTP {e.response.status_code}")
+                if e.response.status_code not in (406, 429, 500, 502, 503, 504):
+                    break  # not transient -- next mirror
+            except httpx.RequestError as e:
+                errors.append(f"{url}: {type(e).__name__}")
+            time.sleep(BACKOFF_SECONDS * (attempt + 1))
+    raise RuntimeError("; ".join(errors))
 
-    if resp is None:
-        # Every mirror failed -- report this as an explicit, unresolved check
-        # rather than silently treating the road as safe. The Logistics
-        # Validator's prompt already treats a missing road_type result as a
-        # hard failure, which is the correct behavior here.
-        joined = "; ".join(errors)
-        return f"ERROR: could not reach any Overpass mirror to check this road ({joined})"
 
-    elements = resp.json().get("elements", [])
-    if not elements:
-        return "No tagged road found near this point (may be off the mapped network)"
-
-    ways = [el["tags"] for el in elements if "tags" in el]
+def classify(ways: list[dict], radius_m: int) -> str:
+    """OK/WARNING verdict for the highway-tagged ways found at one point."""
+    if not ways:
+        return "WARNING: no mapped road at this point -- check it is reachable by car"
     highway_types = sorted({t["highway"] for t in ways})
     all_types = ", ".join(highway_types)
     offroad = sorted({t["highway"] for t in ways if t["highway"] in OFFROAD_TAGS})
@@ -133,21 +121,54 @@ def road_type(lat: float, lon: float, radius_m: int = DEFAULT_RADIUS_M) -> str:
         note = ""
         if rough or offroad:
             note = f" (also nearby: {describe(rough) or ', '.join(offroad)} -- check which one the route uses)"
-        return f"OK: paved drivable road here ({describe(paved)}){note}. All types nearby: {all_types}"
+        return f"OK: paved drivable road here ({describe(paved)}){note}"
     if rough:
         return (
             f"WARNING: the only drivable road here is unpaved/rough ({describe(rough)}) -- "
-            f"likely not suitable for a standard rental car. All types nearby: {all_types}"
+            "likely not suitable for a standard rental car"
         )
     if offroad:
         return (
-            f"WARNING: only off-road track(s) here, no paved/drivable road within {radius_m}m — "
-            f"not passable by a standard rental car. All types nearby: {all_types}"
+            f"WARNING: only off-road track(s) here, no paved/drivable road within {radius_m}m -- "
+            f"not passable by a standard rental car (nearby: {all_types})"
         )
-    return (
-        f"WARNING: no car-drivable road within {radius_m}m (only: {all_types}) — "
-        "check this point is reachable by car"
-    )
+    return f"WARNING: no car-drivable road within {radius_m}m (only: {all_types}) -- check this point is reachable by car"
+
+
+def _dist_to_way(lat: float, lon: float, geom: list[dict]) -> float:
+    """Approximate distance (m) from a point to a way's polyline (equirectangular)."""
+    kx = 111_320 * math.cos(math.radians(lat))
+    ky = 110_540
+    best = float("inf")
+    pts = [((g["lon"] - lon) * kx, (g["lat"] - lat) * ky) for g in geom]
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:] or pts):
+        dx, dy = x2 - x1, y2 - y1
+        seg = dx * dx + dy * dy
+        t = 0.0 if seg == 0 else max(0.0, min(1.0, -(x1 * dx + y1 * dy) / seg))
+        best = min(best, math.hypot(x1 + t * dx, y1 + t * dy))
+    return best
+
+
+def road_types(points: list[tuple[float, float]], radius_m: int = DEFAULT_RADIUS_M) -> list[str]:
+    """Classify many points with ONE Overpass request (sequential single-point
+    calls in parallel got rate-limited on a real run). Ways are assigned to
+    points by distance to their geometry."""
+    parts = "".join(f'way(around:{radius_m},{lat},{lon})["highway"];' for lat, lon in points)
+    try:
+        data = _post(f"[out:json][timeout:60];({parts});out tags geom;")
+    except RuntimeError as e:
+        # Explicit, unresolved check -- never silently treat the road as safe.
+        return [f"ERROR: could not reach any Overpass mirror ({e})"] * len(points)
+    ways = [el for el in data.get("elements", []) if "tags" in el and "geometry" in el]
+    return [
+        classify([w["tags"] for w in ways if _dist_to_way(lat, lon, w["geometry"]) <= radius_m], radius_m)
+        for lat, lon in points
+    ]
+
+
+def road_type(lat: float, lon: float, radius_m: int = DEFAULT_RADIUS_M) -> str:
+    """Classify the road at a single coordinate."""
+    return road_types([(lat, lon)], radius_m)[0]
 
 
 def main() -> None:
