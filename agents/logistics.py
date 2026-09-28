@@ -1,13 +1,15 @@
-"""Logistics Validator agent: checks every itinerary leg against real road data."""
+"""Logistics Validator agent: checks every itinerary leg against real road data,
+researching deeper when the tools can't confirm a road."""
 
+import json
 from pathlib import Path
 
-from agents.base import run_agent
+from agents.base import ClaudeCLIError, _invoke_claude
+from schemas.logistics import LogisticsReport
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "logistics.md").read_text()
 
-# Per-leg OSRM + multi-point Overpass checks (with mirror fallback/backoff) can
-# exceed the 600s default on a multi-day trip.
+# route_check per leg plus web research on any leg it can't confirm.
 TIMEOUT = 1200
 
 TOOL_HINT = (
@@ -20,11 +22,23 @@ TOOL_HINT = (
 )
 
 
-def validate(itinerary_json: str) -> str:
-    """Validate an itinerary's driving legs and flag off-road/overloaded days.
-
-    Args:
-        itinerary_json: JSON-serialized Itinerary (see schemas/itinerary.py)
-    """
-    task = f"{itinerary_json}\n\n{TOOL_HINT}"
-    return run_agent(SYSTEM_PROMPT, ["Bash"], task, timeout=TIMEOUT)
+def validate(itinerary_json: str) -> LogisticsReport:
+    """Validate an itinerary's driving legs; returns a structured report whose
+    ok() decides whether the itinerary may proceed to the page."""
+    payload = _invoke_claude(
+        SYSTEM_PROMPT,
+        allowed_tools=["Bash", "WebSearch", "WebFetch"],
+        user_input=f"{itinerary_json}\n\n{TOOL_HINT}",
+        timeout=TIMEOUT,
+        extra_args=["--json-schema", json.dumps(LogisticsReport.model_json_schema())],
+    )
+    structured = payload.get("structured_output")
+    if structured is not None:
+        return LogisticsReport.model_validate(structured)
+    text = payload.get("result")
+    if text is None:
+        raise ClaudeCLIError(f"claude JSON output missing both 'structured_output' and 'result': {payload!r}")
+    try:
+        return LogisticsReport.model_validate_json(text)
+    except Exception as e:
+        raise ClaudeCLIError(f"Logistics Validator did not return a valid report: {text[:500]!r}") from e
