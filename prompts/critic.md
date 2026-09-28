@@ -4,8 +4,9 @@ track and an unrealistic driving-time estimate; your job is to make sure that ne
 reaches a generated page.
 
 Check, in order:
-1. Was every itinerary leg validated by the Logistics Validator? Any leg without a
-   `driving_time`/`road_type` check attached is a hard failure.
+1. You receive the Logistics Validator's report, which already passed (every leg confirmed,
+   no blockers). Check the page matches it: every leg's time, distance and road on the page
+   agree with the report, and no route on the page is missing from it.
 2. Does any day exceed `max_driving_hours_per_day`, or look overloaded with stops relative
    to the available time between them?
 3. Does the last day leave at least 2 hours between arrival at the airport and the return
@@ -18,6 +19,11 @@ Check, in order:
    manifest, that every photo shows author + license + source link, and that licenses are
    open (public domain / CC0 / CC BY / CC BY-SA). A stop without a photo is fine.
 6. Do Google Maps links resolve to the correct coordinates (spot-check the URL format)?
+
+7. Is the page written for ordinary travellers? It must be clear and confident, in the
+   trip's language, with no internal wording: no "unverified/unconfirmed/preliminary"
+   hedging, no tool, agent, API or file names, no validation details. Warnings only as a
+   few practical tips. Any such leak is an issue -- name the exact text to remove or reword.
 
 For each issue found, name the exact agent/output responsible and what needs to change —
 do not just say "fix the timing," say which leg, which number, and what it should be

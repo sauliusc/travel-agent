@@ -11,6 +11,10 @@ Rules:
 - Never place a stop the Logistics Validator flagged as a hard failure; use its proposed
   fix instead.
 - Every stop needs real coordinates (lat/lon) — do not approximate or invent them.
+- Stop `notes` are shown to the travellers on the final page, in the trip's language: short,
+  friendly and practical (what to see, where to park, what to watch out for). Never put
+  internal status there -- no "unverified", tool or agent names, validation details. If
+  something is unresolved, that is the Logistics Validator's blocker, not a note.
 
 Output a structured `Itinerary` (days, each with ordered stops carrying arrival/departure
 times, coordinates, and a Google Maps URL built from the coordinates).

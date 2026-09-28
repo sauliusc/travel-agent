@@ -14,16 +14,18 @@ SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "critic.md").read_te
 MAX_FIX_ITERATIONS = 3
 
 
-def review(page_html: str, itinerary_json: str, images_manifest_json: str) -> str:
+def review(page_html: str, itinerary_json: str, logistics_report_json: str, images_manifest_json: str) -> str:
     """Review a generated page and itinerary for logistics/consistency errors.
 
     Args:
         page_html: the generated index.html content
         itinerary_json: the Itinerary the page was built from
+        logistics_report_json: the passed LogisticsReport (schemas/logistics.py)
         images_manifest_json: verified ImageResults from tools/image_download.py
     """
     task = (
         f"Page HTML:\n{page_html}\n\nItinerary:\n{itinerary_json}\n\n"
+        f"Logistics report (already passed validation):\n{logistics_report_json}\n\n"
         f"Verified image manifest:\n{images_manifest_json}"
     )
     return run_agent(SYSTEM_PROMPT, [], task)

@@ -22,10 +22,32 @@ from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 from agents.weather import check as run_weather
 from schemas.images import ImageResults
+from schemas.logistics import LogisticsReport
 from schemas.requirements import TripRequirements
 from tools.image_download import download_images
 
 REPO_PREFIX = "ai-trip-"
+
+# How many times the planner may rework the itinerary on Logistics Validator
+# blockers before the run stops. An unresolved road/timing problem must never
+# reach the page as a "warning" -- travellers can't act on uncertainty.
+MAX_LOGISTICS_FIXES = 2
+
+
+class LogisticsBlocked(RuntimeError):
+    """The itinerary still has logistics blockers after MAX_LOGISTICS_FIXES reworks."""
+
+
+def _blocker_text(report: LogisticsReport) -> str:
+    return "\n".join(f"- {b.where}: {b.problem} -> {b.fix}" for b in report.blockers())
+
+
+def _page_logistics(report: LogisticsReport) -> dict:
+    # Traveller-facing facts only; `evidence` is internal.
+    return {
+        "legs": [leg.model_dump(exclude={"evidence", "confirmed"}) for leg in report.legs],
+        "traveler_tips": report.traveler_tips,
+    }
 
 # Pipeline stages in dependency order. run_from_stage() uses this to decide,
 # for a given starting stage, which earlier stages can be taken from
@@ -151,13 +173,37 @@ def run_from_stage(
     else:
         itinerary = cached_outputs["itinerary"]
 
+    def validate_until_ok(itinerary: str) -> tuple[str, LogisticsReport]:
+        """Validate; on blockers let the planner rework the itinerary and
+        re-validate, so only a fully confirmed itinerary moves on."""
+        for attempt in range(MAX_LOGISTICS_FIXES + 1):
+            progress("Logistikos patikra (važiavimo laikai, keliai)..." if attempt == 0
+                     else f"Pakartotinė logistikos patikra ({attempt}/{MAX_LOGISTICS_FIXES})...")
+            with log_calls("logistics_report", on_llm_call):
+                report = validate(itinerary)
+            stage_done("logistics_report", report.model_dump_json())
+            if report.ok():
+                return itinerary, report
+            if attempt == MAX_LOGISTICS_FIXES:
+                break
+            progress(f"Logistika rado {len(report.blockers())} problemą(-as) -- dienų planas perdaromas...")
+            with log_calls("itinerary", on_llm_call):
+                itinerary = fix(itinerary, "Logistics Validator blockers:\n" + _blocker_text(report))
+            stage_done("itinerary", itinerary)
+        raise LogisticsBlocked(
+            f"Logistika nepatvirtino maršruto po {MAX_LOGISTICS_FIXES} perdarymų:\n"
+            f"{_blocker_text(report)}\nPakoreguok kelionę per „Pataisyti“ ir paleisk iš naujo."
+        )
+
     if reached("logistics_report"):
-        progress("Logistikos patikra (važiavimo laikai, keliai)...")
-        with log_calls("logistics_report", on_llm_call):
-            logistics_report = validate(itinerary)
-        stage_done("logistics_report", logistics_report)
+        itinerary, logistics_report = validate_until_ok(itinerary)
     else:
-        logistics_report = cached_outputs["logistics_report"]
+        logistics_report = LogisticsReport.model_validate_json(cached_outputs["logistics_report"])
+        if not logistics_report.ok():
+            raise LogisticsBlocked(
+                "Išsaugota logistikos ataskaita turi neišspręstų problemų -- paleisk nuo „Logistika“:\n"
+                + _blocker_text(logistics_report)
+            )
 
     if reached("map_data"):
         progress("Žemėlapio duomenų ruošimas...")
@@ -191,11 +237,21 @@ def run_from_stage(
     else:
         budget = cached_outputs["budget"]
 
+    def page_context() -> dict:
+        return {
+            "language": requirements.language,
+            "itinerary": itinerary,
+            "logistics": _page_logistics(logistics_report),
+            "budget": budget,
+            "map_data": map_data,
+            "images": images_for_page,
+        }
+
     page_freshly_built = reached("page")
     if page_freshly_built:
         progress("Puslapio generavimas...")
         with log_calls("page", on_llm_call):
-            page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
+            page = run_page_designer(page_context())
         stage_done("page", page)
     else:
         page = cached_outputs["page"]
@@ -206,18 +262,16 @@ def run_from_stage(
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
             with log_calls("critic", on_llm_call):
-                critique = review(page, itinerary, images.model_dump_json())
+                critique = review(page, itinerary, logistics_report.model_dump_json(), images.model_dump_json())
             if "no issues" in critique.lower() or "everything passes" in critique.lower():
                 break
             progress("Taisomos peržiūroje rastos problemos...")
             with log_calls("itinerary", on_llm_call):
                 itinerary = fix(itinerary, critique)
             stage_done("itinerary", itinerary)
-            with log_calls("logistics_report", on_llm_call):
-                logistics_report = validate(itinerary)
-            stage_done("logistics_report", logistics_report)
+            itinerary, logistics_report = validate_until_ok(itinerary)
             with log_calls("page", on_llm_call):
-                page = run_page_designer({"itinerary": itinerary, "map_data": map_data, "images": images_for_page})
+                page = run_page_designer(page_context())
             stage_done("page", page)
 
     progress("Repozitorijos kūrimas ir puslapio publikavimas...")
