@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -82,6 +83,40 @@ def _resolve_claude_bin() -> str:
     return "claude"  # let subprocess.run raise FileNotFoundError with a clear message
 
 
+def _transcript_tail(session_id: str, limit: int = 25) -> str:
+    """Last tool calls/results from Claude Code's own session transcript.
+
+    A timed-out `claude -p` is killed before it prints anything, so without
+    this the console only shows "did not finish within Ns" -- this is what
+    it was actually doing (on a real run: parallel Overpass calls each
+    stalling past the Bash tool's 120s limit).
+    """
+    matches = list((Path.home() / ".claude" / "projects").glob(f"*/{session_id}.jsonl"))
+    if not matches:
+        return "(no session transcript found)"
+    lines = []
+    for raw in matches[0].read_text(errors="replace").splitlines():
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        ts = entry.get("timestamp", "")[11:19]
+        content = (entry.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                inp = block.get("input") or {}
+                lines.append(f"{ts} CALL   {str(inp.get('command', inp))[:300]}")
+            elif block.get("type") == "tool_result":
+                body = block.get("content")
+                body = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
+                lines.append(f"{ts} RESULT {body[:300]}".replace("\n", " "))
+    return "\n".join(lines[-limit:]) or "(transcript has no tool calls)"
+
+
 class ClaudeCLIError(RuntimeError):
     """Raised when the claude CLI exits non-zero or returns malformed output."""
 
@@ -100,6 +135,7 @@ def _invoke_claude(
     schema-validated extraction (which also needs the raw payload to read
     a structured-output field, not just "result").
     """
+    session_id = str(uuid.uuid4())
     cmd = [
         _resolve_claude_bin(),
         "-p",
@@ -112,6 +148,8 @@ def _invoke_claude(
         permission_mode,
         "--output-format",
         "json",
+        "--session-id",
+        session_id,
         *(extra_args or []),
     ]
 
@@ -139,7 +177,10 @@ def _invoke_claude(
             "`claude auth login` (see docs/PROXMOX_SETUP.md)"
         ) from e
     except subprocess.TimeoutExpired as e:
-        _record(f"ERROR: claude did not finish within {timeout}s")
+        _record(
+            f"ERROR: claude did not finish within {timeout}s\n\n"
+            f"Last tool activity (session {session_id}):\n{_transcript_tail(session_id)}"
+        )
         raise ClaudeCLIError(f"claude did not finish within {timeout}s") from e
 
     if result.returncode != 0:
