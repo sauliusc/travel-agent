@@ -40,7 +40,10 @@ def on_startup():
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    # no-cache: revalidate on every load. Without it a phone kept showing the
+    # pre-update page from its cache (heuristic freshness), so a deployed
+    # layout fix looked like it hadn't worked.
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 def _run_pipeline(
