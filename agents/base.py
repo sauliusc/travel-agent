@@ -25,6 +25,12 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT = 600  # seconds
 
+# No agent may write files: every agent's output is its answer, which the
+# orchestrator persists and passes on. Agents run in the repo checkout, and a
+# real Page Designer run used Write to save index.html into it, then returned
+# a summary of what it did -- which was published as the trip page.
+ALWAYS_DISALLOWED = ["Write", "Edit", "NotebookEdit"]
+
 # Set by orchestrator.py (via log_calls()) around each stage's agent call so
 # every real `claude -p` query+response can be persisted to the console DB
 # (console/db.py's trip_agent_calls) instead of only being visible by
@@ -128,6 +134,7 @@ def _invoke_claude(
     permission_mode: str = "auto",
     timeout: int = DEFAULT_TIMEOUT,
     extra_args: list[str] | None = None,
+    disallowed_tools: list[str] | None = None,
 ) -> dict:
     """Run `claude -p` and return its full parsed JSON payload.
 
@@ -144,6 +151,8 @@ def _invoke_claude(
         system_prompt,
         "--allowedTools",
         ",".join(allowed_tools),
+        "--disallowedTools",
+        ",".join(ALWAYS_DISALLOWED + (disallowed_tools or [])),
         "--permission-mode",
         permission_mode,
         "--output-format",
