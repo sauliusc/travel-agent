@@ -70,7 +70,7 @@ def _run_pipeline(
     try:
         db.set_status(trip_id, "running")
         log("Pradedama..." if stage_name == "requirements" else f"Perleidžiama nuo žingsnio: {stage_name}...")
-        page_html = run_from_stage(
+        url = run_from_stage(
             stage_name,
             cached_outputs=cached_outputs,
             on_progress=log,
@@ -79,9 +79,8 @@ def _run_pipeline(
             modification=modification,
             user_requirements=requirements_text,
         )
-        # TODO: once the CI/CD agent returns a real URL, wire it in here
-        # instead of this placeholder.
-        db.set_status(trip_id, "done", page_url="(CI/CD agent not implemented yet)")
+        db.set_status(trip_id, "done", page_url=url)
+        log(f"Puslapis paskelbtas: {url}")
         log("Baigta.")
     except NotImplementedError as e:
         db.set_status(trip_id, "failed")

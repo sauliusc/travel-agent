@@ -13,6 +13,7 @@ from agents.accommodation import find as run_accommodation
 from agents.base import log_calls
 from agents.budget import estimate as run_budget
 from agents.cicd import deploy as run_cicd
+from agents.cicd import page_url
 from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.images import fetch_images as run_images
 from agents.itinerary import fix, plan
@@ -86,7 +87,8 @@ def run_from_stage(
     user_requirements: str | None = None,
 ) -> str:
     """Run the pipeline starting at `stage_name`, reusing cached_outputs for
-    everything before it, and continue through to CI/CD deploy.
+    everything before it, and continue through to CI/CD deploy. Returns the
+    published page's URL.
 
     Every stage from `stage_name` onward is recomputed, since each stage
     depends on the ones before it (e.g. a fresh itinerary means map/images/
@@ -281,8 +283,9 @@ def run_from_stage(
 
     progress("Repozitorijos kūrimas ir puslapio publikavimas...")
     repo_name = _slugify(requirements)
+    owner = os.environ.get("GITHUB_OWNER", "sauliusc")
     deploy_log = run_cicd(
-        owner=os.environ.get("GITHUB_OWNER", "sauliusc"),
+        owner=owner,
         repo_name=repo_name,
         description=f"{requirements.destination} trip page",
         page_html=page,
@@ -290,11 +293,11 @@ def run_from_stage(
     )
     stage_done("deploy_log", deploy_log)
     print(deploy_log)
-    return page
+    return page_url(owner, repo_name)
 
 
 def run_travel_planner(user_requirements: str, on_progress=None, on_stage_complete=None, on_llm_call=None) -> str:
-    """Run the full pipeline for one trip request and return the final page HTML.
+    """Run the full pipeline for one trip request and return the published page's URL.
 
     Args:
         user_requirements: free-text trip request from the user

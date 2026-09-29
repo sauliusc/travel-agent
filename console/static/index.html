@@ -59,6 +59,10 @@
   .btn.link { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.link:hover { background: var(--accent-2); border-color: var(--accent-2); }
 
+  #detail-page-link { margin: 4px 0 8px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; background: rgba(58,140,124,0.12); font-size: 14px; }
+  #detail-page-link a { color: var(--accent-2); font-weight: 600; word-break: break-all; }
+  #detail-page-link .hint { display: block; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+
   .stages-panel { margin-top: 12px; }
   .stages-panel .stages-label { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
   .stage-chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -160,6 +164,7 @@
           <span id="detail-time" class="trip-time"></span>
         </div>
         <div id="detail-req" class="req-text"></div>
+        <div id="detail-page-link" hidden></div>
         <div class="action-row" id="detail-actions"></div>
         <div id="detail-stages"></div>
         <div id="detail-modify"></div>
@@ -282,12 +287,10 @@ function renderDetailHeader(trip) {
   document.getElementById('detail-time').textContent =
     fmtTime(trip.created_at) + (trip.finished_at ? ' → ' + fmtTime(trip.finished_at) : '');
   document.getElementById('detail-req').textContent = trip.requirements_text;
+  renderPageLink(trip);
 
   const actions = document.getElementById('detail-actions');
   let out = '';
-  if (trip.status === 'done' && trip.page_url && trip.page_url.startsWith('http')) {
-    out += `<a class="btn link" href="${trip.page_url}" target="_blank" rel="noopener">Atidaryti puslapį ↗</a>`;
-  }
   if (trip.status === 'failed') {
     out += `<button class="btn" onclick="retryTrip('${trip.id}')">↻ Bandyti dar kartą</button>`;
   }
@@ -406,6 +409,26 @@ async function loadStageCalls(item) {
 
     body.appendChild(entry);
   });
+}
+
+// Link to the published trip page, shown under the original request once
+// the page has been pushed to GitHub. Kept visible during a rerun (same URL,
+// it gets overwritten when the rerun finishes).
+function renderPageLink(trip) {
+  const box = document.getElementById('detail-page-link');
+  const url = trip.page_url;
+  if (!url || !/^https:\/\//.test(url)) { box.hidden = true; box.textContent = ''; return; }
+  box.textContent = '🌐 Kelionės puslapis: ';
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = url;
+  box.appendChild(a);
+  const hint = document.createElement('span');
+  hint.className = 'hint';
+  hint.textContent = trip.status === 'done'
+    ? 'Po paskelbimo GitHub Pages atsinaujina per ~1–2 min.'
+    : 'Vykdomas perleidimas — puslapis bus atnaujintas, kai jis baigsis.';
+  box.appendChild(hint);
+  box.hidden = false;
 }
 
 function renderStagePanel(trip) {

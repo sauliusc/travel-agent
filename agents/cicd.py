@@ -51,6 +51,16 @@ def deploy(owner: str, repo_name: str, description: str, page_html: str, images:
         ))
 
     log.append(enable_pages(owner=owner, repo=repo_name))
-    log.append(push_file(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: trip page"))
+    index_result = push_file(owner=owner, repo=repo_name, path="index.html", content=page_html, message="feat: trip page")
+    log.append(index_result)
+    if index_result.startswith("Failed"):
+        # Without index.html there is no page to link to -- fail the run
+        # rather than report a published page that doesn't exist.
+        raise RuntimeError("Puslapio nepavyko įkelti į GitHub:\n" + "\n".join(log))
 
     return "\n".join(log)
+
+
+def page_url(owner: str, repo_name: str) -> str:
+    """Public GitHub Pages URL of a trip repo."""
+    return f"https://{owner}.github.io/{repo_name}/"
