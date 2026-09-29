@@ -19,6 +19,8 @@ Check, in order:
    manifest, that every photo shows author + license + source link, and that licenses are
    open (public domain / CC0 / CC BY / CC BY-SA). A stop without a photo is fine.
 6. Do Google Maps links resolve to the correct coordinates (spot-check the URL format)?
+   Each day with a route must have its day-route button(s) using exactly the given
+   `day_routes` URL(s) -- reported as an issue if missing or altered.
 
 7. Is the page written for ordinary travellers? It must be clear and confident, in the
    trip's language, with no internal wording: no "unverified/unconfirmed/preliminary"

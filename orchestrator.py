@@ -5,6 +5,7 @@ CI/CD deploy.
 All 14 agents from the design doc are wired in.
 """
 
+import json
 import os
 import re
 
@@ -24,7 +25,9 @@ from agents.weather import check as run_weather
 from schemas.images import ImageResults
 from schemas.logistics import LogisticsReport
 from schemas.requirements import TripRequirements
+from schemas.itinerary import Itinerary
 from tools.image_download import download_images
+from tools.maps_links import day_routes
 
 REPO_PREFIX = "ai-trip-"
 
@@ -241,6 +244,7 @@ def run_from_stage(
         return {
             "language": requirements.language,
             "itinerary": itinerary,
+            "day_routes": day_routes(Itinerary.model_validate_json(itinerary)),
             "logistics": _page_logistics(logistics_report),
             "budget": budget,
             "map_data": map_data,
@@ -262,7 +266,8 @@ def run_from_stage(
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
             with log_calls("critic", on_llm_call):
-                critique = review(page, itinerary, logistics_report.model_dump_json(), images.model_dump_json())
+                critique = review(page, itinerary, logistics_report.model_dump_json(), images.model_dump_json(),
+                                  json.dumps(page_context()["day_routes"], ensure_ascii=False))
             if "no issues" in critique.lower() or "everything passes" in critique.lower():
                 break
             progress("Taisomos peržiūroje rastos problemos...")
