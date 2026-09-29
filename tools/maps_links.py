@@ -6,7 +6,7 @@ Uses the documented Maps URLs format:
 https://www.google.com/maps/dir/?api=1&origin=..&destination=..&waypoints=..&travelmode=driving
 """
 
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 from schemas.itinerary import Itinerary
 
@@ -47,3 +47,8 @@ def day_routes(itinerary: Itinerary) -> list[dict]:
                 urls.append(directions_url(points[start:start + MAX_STOPS_PER_LINK]))
         routes.append({"day": day.number, "title": day.title, "urls": urls})
     return routes
+
+
+def place_search_url(name: str, city: str) -> str:
+    """Google Maps search link for a named place (restaurant, bar) in a city."""
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{name}, {city}")

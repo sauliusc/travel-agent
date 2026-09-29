@@ -13,3 +13,6 @@ Always mark which numbers are confirmed (found via search) vs. estimated, and gi
 min/likely/max range rather than a single number.
 
 Output a structured budget table.
+
+Use the given `car_rental` prices (the cheapest of the recommended companies, if a car is
+needed) and the `food` eateries' per-person prices instead of generic estimates.

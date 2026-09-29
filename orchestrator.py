@@ -12,9 +12,11 @@ import re
 from agents.accommodation import find as run_accommodation
 from agents.base import log_calls
 from agents.budget import estimate as run_budget
+from agents.car_rental import find as run_car_rental
 from agents.cicd import deploy as run_cicd
 from agents.cicd import page_url
 from agents.critic import MAX_FIX_ITERATIONS, review
+from agents.food import guide as run_food
 from agents.images import fetch_images as run_images
 from agents.itinerary import fix, plan
 from agents.logistics import validate
@@ -23,6 +25,8 @@ from agents.page_designer import design as run_page_designer
 from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 from agents.weather import check as run_weather
+from schemas.car_rental import CarRentalResults
+from schemas.food import FoodGuide
 from schemas.images import ImageResults
 from schemas.logistics import LogisticsReport
 from schemas.requirements import TripRequirements
@@ -65,6 +69,8 @@ STAGE_ORDER = [
     "logistics_report",
     "map_data",
     "images",
+    "car_rental",
+    "food",
     "budget",
     "page",
     "deploy_log",
@@ -234,10 +240,37 @@ def run_from_stage(
     # typed ImageResults for run_cicd (which needs .images/.license, not a dict).
     images_for_page = images.model_dump()
 
+    if reached("car_rental"):
+        progress("Automobilio nuomos pasiūlymai...")
+        with log_calls("car_rental", on_llm_call):
+            car_rental = run_car_rental(requirements_json, user_requirements or "")
+        if not car_rental.needed:
+            progress("Automobilio nuoma šiai kelionei nereikalinga -- praleidžiama.")
+        stage_done("car_rental", car_rental.model_dump_json())
+    else:
+        car_rental = CarRentalResults.model_validate_json(cached_outputs["car_rental"])
+
+    if reached("food"):
+        progress("Maistas, vietiniai patiekalai ir barai...")
+        with log_calls("food", on_llm_call):
+            food = run_food(requirements_json, itinerary, accommodation)
+        stage_done("food", food.model_dump_json())
+    else:
+        food = FoodGuide.model_validate_json(cached_outputs["food"])
+
+    # Stop photos and dish photos are shipped together.
+    all_images = ImageResults(
+        images=[*images.images, *(d.image for d in food.dishes if d.image)],
+        skipped=images.skipped,
+    )
+
     if reached("budget"):
         progress("Biudžeto skaičiavimas...")
         with log_calls("budget", on_llm_call):
-            budget = run_budget({"itinerary": itinerary, "accommodation": accommodation})
+            budget = run_budget({
+                "itinerary": itinerary, "accommodation": accommodation,
+                "car_rental": car_rental.model_dump(), "food": food.model_dump(exclude={"dishes": {"__all__": {"image"}}}),
+            })
         stage_done("budget", budget)
     else:
         budget = cached_outputs["budget"]
@@ -251,6 +284,8 @@ def run_from_stage(
             "budget": budget,
             "map_data": map_data,
             "images": images_for_page,
+            "car_rental": car_rental.model_dump(),
+            "food": food.model_dump(),
         }
 
     page_freshly_built = reached("page")
@@ -268,7 +303,7 @@ def run_from_stage(
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
             with log_calls("critic", on_llm_call):
-                critique = review(page, itinerary, logistics_report.model_dump_json(), images.model_dump_json(),
+                critique = review(page, itinerary, logistics_report.model_dump_json(), all_images.model_dump_json(),
                                   json.dumps(page_context()["day_routes"], ensure_ascii=False))
             if "no issues" in critique.lower() or "everything passes" in critique.lower():
                 break
@@ -289,7 +324,7 @@ def run_from_stage(
         repo_name=repo_name,
         description=f"{requirements.destination} trip page",
         page_html=page,
-        images=images,
+        images=all_images,
     )
     stage_done("deploy_log", deploy_log)
     print(deploy_log)
