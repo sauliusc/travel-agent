@@ -22,6 +22,10 @@ Everything you receive has already been checked (routes validated, images verifi
 - Short intro: where, when, who, route overview.
 - Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
   from `logistics.legs`), stop notes.
+- At the top of each day, a prominent button that opens the whole day's driving route in
+  Google Maps (e.g. "🧭 Dienos maršrutas Google Maps"), using that day's URL from
+  `day_routes` exactly as given, `target="_blank"`. If a day has several URLs, show one
+  button per part ("1 dalis", "2 dalis"); if it has none, show no button.
 - A Leaflet.js map using `map_data`.
 - Photos: use only entries in `images.images`, by their exact `local_path`. Under each,
   a small credit: author, license, link to `source_url`. A stop with no image has no photo.
