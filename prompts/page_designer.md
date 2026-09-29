@@ -31,6 +31,18 @@ Everything you receive has already been checked (routes validated, images verifi
   a small credit: author, license, link to `source_url`. A stop with no image has no photo.
   Lightbox: pure CSS + JS, click `.spot-thumb` to open fullscreen, no library.
 - Budget summary from `budget`, if present.
+- If `car_rental.needed`: a "Automobilio nuoma" section with the 3 companies as cards --
+  name, rating with review count and source, car class, estimated total price, the `why`
+  sentence, pickup place, a booking link -- plus `car_rental.tips`.
+- "Kur pavalgyti" section: `food.eateries` grouped by day, each with what it's near, kind,
+  typical price per person, the `why` sentence and a "Žemėlapyje" link (`maps_url`). Also
+  mention the relevant eatery in that day's section (lunch/dinner).
+- "Ką paragauti" section: `food.dishes` as cards -- photo (`image.local_path`, with author +
+  license + source credit; no photo if `image` is null), local name, description, price
+  range, where to try it.
+- `food.bars`, if any: add each to its day's section as an optional evening visit (why
+  it's special, `maps_url` link), and list them in the food section too. No bars section
+  if the list is empty.
 - Practical-info card: car return time, flight times, contact placeholders.
 - `<!-- BUILD_TIME -->` placeholder for the deploy workflow to inject.
 

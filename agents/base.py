@@ -238,3 +238,30 @@ def run_agent(
     if text is None:
         raise ClaudeCLIError(f"claude JSON output missing 'result' field: {payload!r}")
     return text
+
+
+def run_structured(
+    system_prompt: str,
+    allowed_tools: list[str],
+    user_input: str,
+    model,
+    timeout: int = DEFAULT_TIMEOUT,
+    disallowed_tools: list[str] | None = None,
+):
+    """Run one agent turn with --json-schema for a Pydantic `model` and return
+    the validated instance (structured_output first, then "result" as JSON)."""
+    payload = _invoke_claude(
+        system_prompt, allowed_tools, user_input, timeout=timeout,
+        extra_args=["--json-schema", json.dumps(model.model_json_schema())],
+        disallowed_tools=disallowed_tools,
+    )
+    structured = payload.get("structured_output")
+    if structured is not None:
+        return model.model_validate(structured)
+    text = payload.get("result")
+    if text is None:
+        raise ClaudeCLIError(f"claude JSON output missing both 'structured_output' and 'result': {payload!r}")
+    try:
+        return model.model_validate_json(text)
+    except Exception as e:
+        raise ClaudeCLIError(f"agent did not return a valid {model.__name__}: {text[:500]!r}") from e

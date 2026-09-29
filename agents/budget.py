@@ -12,8 +12,8 @@ def estimate(context: dict) -> str:
     """Estimate a cost breakdown (flights, car, lodging, food, tickets, fuel).
 
     Args:
-        context: dict with keys "itinerary" and "accommodation" (as produced by
-            the Itinerary Planner and Accommodation agents)
+        context: dict with "itinerary", "accommodation", and the Car Rental and
+            Food agents' output ("car_rental", "food") for real price inputs
     """
     task = json.dumps(context, ensure_ascii=False)
     return run_agent(SYSTEM_PROMPT, ["WebSearch"], task)
