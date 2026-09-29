@@ -34,14 +34,12 @@ def _run(task: str) -> str:
         allowed_tools=[],
         user_input=f"{task}\n\n{COMPLETION_RULE}",
         timeout=TIMEOUT,
-        extra_args=[
-            "--json-schema", json.dumps(Itinerary.model_json_schema()),
-            # --allowedTools [] only skips permission prompts; under
-            # --permission-mode auto the planner still ran Bash (OSRM/Overpass
-            # sweeps) on real runs, doing the Logistics Validator's job and
-            # eating minutes. Deny outright -- it plans, logistics validates.
-            "--disallowedTools", "Bash,WebSearch,WebFetch",
-        ],
+        extra_args=["--json-schema", json.dumps(Itinerary.model_json_schema())],
+        # --allowedTools [] only skips permission prompts; under
+        # --permission-mode auto the planner still ran Bash (OSRM/Overpass
+        # sweeps) on real runs, doing the Logistics Validator's job and eating
+        # minutes. Deny outright -- it plans, logistics validates.
+        disallowed_tools=["Bash", "WebSearch", "WebFetch"],
     )
     structured = payload.get("structured_output")
     if structured is not None:
