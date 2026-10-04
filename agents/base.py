@@ -123,6 +123,28 @@ def _transcript_tail(session_id: str, limit: int = 25) -> str:
     return "\n".join(lines[-limit:]) or "(transcript has no tool calls)"
 
 
+def _failure_summary(stdout: str, stderr: str) -> str:
+    """The useful part of a failed `claude -p` run.
+
+    On failure the CLI still prints its JSON result, but most of it is usage
+    statistics; cutting the raw text at 2000 chars lost the actual reason on
+    a real run (structured-output retries exhausted, "las..." cut off).
+    """
+    try:
+        payload = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return (stderr or stdout).strip()[:2000]
+    parts = [
+        f"{k}={payload[k]}" for k in ("subtype", "terminal_reason", "api_error_status")
+        if payload.get(k) not in (None, "", "success")
+    ]
+    if payload.get("result"):
+        parts.append(str(payload["result"]))
+    for err in payload.get("errors") or []:
+        parts.append(str(err))
+    return " | ".join(parts)[:4000] or stdout.strip()[:2000]
+
+
 class ClaudeCLIError(RuntimeError):
     """Raised when the claude CLI exits non-zero or returns malformed output."""
 
@@ -193,7 +215,7 @@ def _invoke_claude(
         raise ClaudeCLIError(f"claude did not finish within {timeout}s") from e
 
     if result.returncode != 0:
-        err_text = (result.stderr or result.stdout).strip()[:2000]
+        err_text = _failure_summary(result.stdout, result.stderr)
         _record(f"ERROR: claude exited {result.returncode}: {err_text}")
         raise ClaudeCLIError(f"claude exited {result.returncode}: {err_text}")
 

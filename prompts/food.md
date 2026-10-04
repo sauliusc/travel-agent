@@ -12,10 +12,10 @@ trip's language.
    price range, and which of your `eateries` serve it (`where_to_try`, exact names). For a
    photo, find a Wikimedia Commons image of the dish with
    `python3 tools/wikimedia.py --query "<dish name>"` and put its file title (without
-   `File:`) in `commons_filename`; leave it empty if nothing fitting and openly licensed
-   exists.
+   `File:`) in `commons_filename`; use an empty string if nothing fitting and openly
+   licensed exists.
 3. `bars` -- only bars that are a sight in themselves (historic, unusual setting or
    building, famous local tradition, a view that's a reason to go). An ordinary place for
    a drink doesn't qualify. An empty list is a fine answer.
 
-Leave `maps_url` and `image` empty -- they are filled in by code.
+Map links and verified photos are added by code afterwards.
