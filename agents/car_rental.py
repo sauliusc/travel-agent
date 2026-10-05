@@ -19,6 +19,8 @@ def find(requirements_json: str, user_request: str) -> CarRentalResults:
     if not result.needed:
         return CarRentalResults(needed=False)
     weak = [c.name for c in result.companies if c.rating < MIN_RATING or c.review_count < MIN_REVIEWS]
+    if not result.recommended_car_types:
+        raise ClaudeCLIError("Car Rental agent returned no recommended car types")
     if weak or len(result.companies) != 3:
         raise ClaudeCLIError(
             f"Car Rental agent must return 3 companies rated >= {MIN_RATING} from >= {MIN_REVIEWS} "
