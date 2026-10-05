@@ -17,6 +17,7 @@ from agents.cicd import deploy as run_cicd
 from agents.cicd import page_url
 from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.food import guide as run_food
+from agents.packing import plan as run_packing
 from agents.images import fetch_images as run_images
 from agents.itinerary import fix, plan
 from agents.logistics import validate
@@ -27,12 +28,16 @@ from agents.research import research as run_research
 from agents.weather import check as run_weather
 from schemas.car_rental import CarRentalResults
 from schemas.food import FoodGuide
+from schemas.forecast import TripForecast
+from schemas.packing import PackingList
 from schemas.images import ImageResults
 from schemas.logistics import LogisticsReport
 from schemas.requirements import TripRequirements
 from schemas.itinerary import Itinerary
 from tools.image_download import download_images
+from tools.forecast import trip_forecast
 from tools.maps_links import day_routes
+from tools.packing_html import inject as inject_packing
 
 REPO_PREFIX = "ai-trip-"
 
@@ -71,6 +76,8 @@ STAGE_ORDER = [
     "images",
     "car_rental",
     "food",
+    "forecast",
+    "packing",
     "budget",
     "page",
     "deploy_log",
@@ -258,6 +265,22 @@ def run_from_stage(
     else:
         food = FoodGuide.model_validate_json(cached_outputs["food"])
 
+    if reached("forecast"):
+        progress("Orų prognozė...")
+        forecast = trip_forecast(Itinerary.model_validate_json(itinerary), requirements.start_date)
+        stage_done("forecast", forecast.model_dump_json())
+    else:
+        forecast = TripForecast.model_validate_json(cached_outputs["forecast"])
+
+    if reached("packing"):
+        progress("Daiktų sąrašas...")
+        with log_calls("packing", on_llm_call):
+            packing = run_packing(requirements_json, user_requirements or "", itinerary,
+                                  forecast.model_dump_json(), car_rental.needed)
+        stage_done("packing", packing.model_dump_json())
+    else:
+        packing = PackingList.model_validate_json(cached_outputs["packing"])
+
     # Stop photos and dish photos are shipped together.
     all_images = ImageResults(
         images=[*images.images, *(d.image for d in food.dishes if d.image)],
@@ -286,13 +309,22 @@ def run_from_stage(
             "images": images_for_page,
             "car_rental": car_rental.model_dump(),
             "food": food.model_dump(),
+            "forecast": forecast.model_dump(),
+            "packing": "rendered by code -- only place the <!-- PACKING_LIST --> placeholder",
         }
+
+    repo_name = _slugify(requirements)
+
+    def design_page() -> str:
+        # The checklist (checkboxes + localStorage) is rendered by code, so it
+        # works the same on every page regardless of the designer's markup.
+        return inject_packing(run_page_designer(page_context()), packing, f"packing:{repo_name}")
 
     page_freshly_built = reached("page")
     if page_freshly_built:
         progress("Puslapio generavimas...")
         with log_calls("page", on_llm_call):
-            page = run_page_designer(page_context())
+            page = design_page()
         stage_done("page", page)
     else:
         page = cached_outputs["page"]
@@ -313,11 +345,10 @@ def run_from_stage(
             stage_done("itinerary", itinerary)
             itinerary, logistics_report = validate_until_ok(itinerary)
             with log_calls("page", on_llm_call):
-                page = run_page_designer(page_context())
+                page = design_page()
             stage_done("page", page)
 
     progress("Repozitorijos kūrimas ir puslapio publikavimas...")
-    repo_name = _slugify(requirements)
     owner = os.environ.get("GITHUB_OWNER", "sauliusc")
     deploy_log = run_cicd(
         owner=owner,

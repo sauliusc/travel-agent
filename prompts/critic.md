@@ -28,7 +28,10 @@ Check, in order:
    few practical tips. Any such leak is an issue -- name the exact text to remove or reword.
 8. Food & rental sections: eateries are shown with the day/stop they're near and a price;
    every dish photo is from the manifest; bars appear only if given; if a car is rented,
-   the 3 rental companies show rating, source and price.
+   the 3 rental companies show rating, source and price, after the recommended car types
+   with average prices.
+9. Weather: each day's weather matches `forecast`; climate-based days are presented as
+   typical weather, not as a forecast. A packing checklist (`#packing-list`) is present.
 
 For each issue found, name the exact agent/output responsible and what needs to change —
 do not just say "fix the timing," say which leg, which number, and what it should be

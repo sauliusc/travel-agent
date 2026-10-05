@@ -31,7 +31,14 @@ Everything you receive has already been checked (routes validated, images verifi
   a small credit: author, license, link to `source_url`. A stop with no image has no photo.
   Lightbox: pure CSS + JS, click `.spot-thumb` to open fullscreen, no library.
 - Budget summary from `budget`, if present.
-- If `car_rental.needed`: a "Automobilio nuoma" section with the 3 companies as cards --
+- "Orų prognozė" section from `forecast.days`: per day the place, date, plain summary,
+  min-max temperature, chance of rain, wind. If a day's `source` is `climate`, say plainly
+  it's the typical weather for those dates (the exact forecast appears ~2 weeks before the
+  trip) -- don't call it a forecast. Also a one-line weather note in each day's section.
+- "Ką pasiimti" section containing exactly the line `<!-- PACKING_LIST -->` and nothing
+  else -- the checklist is inserted there automatically. Don't write your own list.
+- If `car_rental.needed`: a "Automobilio nuoma" section -- first `recommended_car_types`
+  (class + models, why it fits, average price per day and for the whole trip), then the 3 companies as cards --
   name, rating with review count and source, car class, estimated total price, the `why`
   sentence, pickup place, a booking link -- plus `car_rental.tips`.
 - "Kur pavalgyti" section: `food.eateries` grouped by day, each with what it's near, kind,

@@ -16,7 +16,9 @@ standartiniam nuomotam automobiliui, o pirminis planas to nepastebėjo.
 Logistics Validator, Accommodation, Itinerary Planner, Map, Image, Page Designer, Budget,
 Weather/Season, Review/Critic, Documentation, CI/CD. Papildomai: Car Rental (3 gerai
 vertinamos nuomos įmonės, jei nuomojamas automobilis) ir Food & Bars (pigios vietinės
-užeigos prie maršruto, regiono patiekalai su kaina ir nuotrauka, ypatingi barai).
+užeigos prie maršruto, regiono patiekalai su kaina ir nuotrauka, ypatingi barai), Orų
+prognozė (kodas, Open-Meteo: prognozė iki 16 d., toliau – daugiametis vidurkis) ir Packing
+Planner (daiktų sąrašas; checkbox'ai su localStorage generuojami kodu).
 
 ## Technologijos
 

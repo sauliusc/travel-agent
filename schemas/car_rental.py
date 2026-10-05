@@ -19,7 +19,16 @@ class RentalCompany(BaseModel):
     booking_url: str
 
 
+class CarTypeRecommendation(BaseModel):
+    car_type: str = Field(description="class with typical models, e.g. 'Kompaktinis SUV (Dacia Duster, Skoda Karoq)'")
+    why: str = Field(description="why it suits this group, luggage and roads, in the trip's language")
+    avg_price_per_day_eur: int = Field(description="average market price per day for the trip dates")
+    avg_total_eur: int = Field(description="average total for the whole rental period incl. basic insurance")
+
+
 class CarRentalResults(BaseModel):
     needed: bool = Field(description="true only if the trip includes renting a car")
+    recommended_car_types: list[CarTypeRecommendation] = Field(
+        default_factory=list, description="2-3 suitable car classes, best fit first")
     companies: list[RentalCompany] = Field(default_factory=list)
     tips: list[str] = Field(default_factory=list, description="short practical rental tips in the trip's language")
