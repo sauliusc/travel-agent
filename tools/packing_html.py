@@ -9,6 +9,7 @@ import html
 from schemas.packing import PackingList
 
 PLACEHOLDER = "<!-- PACKING_LIST -->"
+START, END = "<!-- PACKING_LIST:START -->", "<!-- PACKING_LIST:END -->"
 
 _STYLE = """<style>
 .packing-list{margin:8px 0}
@@ -73,9 +74,18 @@ def render(packing: PackingList, storage_key: str) -> str:
 def inject(page_html: str, packing: PackingList, storage_key: str) -> str:
     """Put the checklist at the placeholder; if the designer left it out, add
     it as its own section before </body> so it's never silently lost."""
-    block = render(packing, storage_key)
+    block = START + render(packing, storage_key) + END
     if PLACEHOLDER in page_html:
         return page_html.replace(PLACEHOLDER, block, 1)
     section = f'<section id="packing"><h2>Ką pasiimti</h2>{block}</section>'
     idx = page_html.lower().rfind("</body>")
     return page_html[:idx] + section + page_html[idx:] if idx != -1 else page_html + section
+
+
+def to_template(page_html: str) -> str | None:
+    """The page with the injected checklist turned back into the placeholder
+    (for incremental page updates), or None if the page has no markers."""
+    a, b = page_html.find(START), page_html.find(END)
+    if a == -1 or b == -1:
+        return None
+    return page_html[:a] + PLACEHOLDER + page_html[b + len(END):]
