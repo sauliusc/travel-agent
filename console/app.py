@@ -58,7 +58,7 @@ def _run_pipeline(
     A plain new/retried trip calls this with the defaults (start at
     "requirements", no cache). A step rerun passes a later `stage_name`
     plus that trip's `cached_outputs` (see /trips/{id}/rerun-from/{stage}).
-    A free-text modification passes stage_name="itinerary" plus
+    A free-text modification passes stage_name="accommodation" plus
     `modification` (see /trips/{id}/modify).
     """
     queue = _queues[trip_id]
@@ -69,7 +69,10 @@ def _run_pipeline(
 
     try:
         db.set_status(trip_id, "running")
-        log("Pradedama..." if stage_name == "requirements" else f"Perleidžiama nuo žingsnio: {stage_name}...")
+        if modification is not None:
+            log(f"Taikomas pataisymas: {modification}")
+        else:
+            log("Pradedama..." if stage_name == "requirements" else f"Perleidžiama nuo žingsnio: {stage_name}...")
         url = run_from_stage(
             stage_name,
             cached_outputs=cached_outputs,
@@ -148,12 +151,15 @@ def modify_trip(trip_id: str, background_tasks: BackgroundTasks, modification: s
     if trip is None:
         raise HTTPException(404, "Trip not found")
     cached = db.get_stage_outputs(trip_id)
-    if "itinerary" not in cached:
-        raise HTTPException(400, "Trip has no completed itinerary yet to modify")
+    missing = [s for s in ("requirements", "research", "weather", "accommodation", "itinerary") if s not in cached]
+    if missing:
+        raise HTTPException(400, f"Trip has no completed {', '.join(missing)} yet to modify")
     db.set_status(trip_id, "queued")
     _queues[trip_id] = asyncio.Queue()
+    # From accommodation: the change is applied to lodging (if it concerns it)
+    # and the itinerary; every later stage reruns only if its inputs changed.
     background_tasks.add_task(
-        _run_pipeline, trip_id, trip["requirements_text"], "itinerary", cached, modification
+        _run_pipeline, trip_id, trip["requirements_text"], "accommodation", cached, modification
     )
     return {"trip_id": trip_id}
 

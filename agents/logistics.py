@@ -22,13 +22,25 @@ TOOL_HINT = (
 )
 
 
-def validate(itinerary_json: str) -> LogisticsReport:
+REUSE_HINT = (
+    "Previous validation report for an earlier version of this itinerary is below. For a leg "
+    "with the same from/to stops as a leg confirmed there, reuse that result (distance, time, "
+    "road, evidence) without running route_check again; check only new or changed legs. "
+    "Daily totals and the airport buffer must still be recomputed for the current plan."
+)
+
+
+def validate(itinerary_json: str, previous: LogisticsReport | None = None) -> LogisticsReport:
     """Validate an itinerary's driving legs; returns a structured report whose
-    ok() decides whether the itinerary may proceed to the page."""
+    ok() decides whether the itinerary may proceed to the page. With
+    `previous`, already-confirmed unchanged legs are reused, not re-checked."""
+    task = f"{itinerary_json}\n\n{TOOL_HINT}"
+    if previous is not None:
+        task += f"\n\n{REUSE_HINT}\n{previous.model_dump_json()}"
     payload = _invoke_claude(
         SYSTEM_PROMPT,
         allowed_tools=["Bash", "WebSearch", "WebFetch"],
-        user_input=f"{itinerary_json}\n\n{TOOL_HINT}",
+        user_input=task,
         timeout=TIMEOUT,
         extra_args=["--json-schema", json.dumps(LogisticsReport.model_json_schema())],
     )
