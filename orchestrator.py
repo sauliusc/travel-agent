@@ -24,6 +24,7 @@ from agents.cicd import page_url
 from agents.critic import MAX_FIX_ITERATIONS, review
 from agents.food import guide as run_food
 from agents.packing import plan as run_packing
+from agents.plan_b import build as run_plan_b
 from agents.images import fetch_images as run_images
 from agents.itinerary import fix, plan
 from agents.logistics import validate
@@ -37,6 +38,7 @@ from schemas.car_rental import CarRentalResults
 from schemas.food import FoodGuide
 from schemas.forecast import TripForecast
 from schemas.packing import PackingList
+from schemas.plan_b import PlanBChecked
 from schemas.images import ImageResults
 from schemas.logistics import LogisticsReport
 from schemas.requirements import TripRequirements
@@ -85,6 +87,7 @@ STAGE_ORDER = [
     "car_rental",
     "food",
     "forecast",
+    "plan_b",
     "packing",
     "budget",
     "page",
@@ -114,10 +117,13 @@ STAGE_DEPS: dict[str, list[str]] = {
     "car_rental": ["requirements"],
     "food": ["requirements", "itinerary", "accommodation"],
     "forecast": ["requirements", "itinerary"],
+    # Not the forecast: every weather-dependent day gets a Plan B regardless,
+    # and a daily-changing forecast would otherwise redo it on every run.
+    "plan_b": ["requirements", "itinerary"],
     "packing": ["requirements", "itinerary", "forecast", "car_rental"],
     "budget": ["itinerary", "accommodation", "car_rental", "food"],
     "page": ["requirements", "itinerary", "logistics_report", "budget", "map_data", "images",
-             "car_rental", "food", "forecast", "packing"],
+             "car_rental", "food", "forecast", "plan_b", "packing"],
     "deploy_log": ["page", "images", "food"],
 }
 
@@ -127,7 +133,7 @@ STAGE_PROMPTS: dict[str, list[str]] = {
     "requirements": ["requirements.md"], "research": ["research.md"], "weather": ["weather.md"],
     "accommodation": ["accommodation.md"], "itinerary": ["itinerary.md"],
     "logistics_report": ["logistics.md"], "map_data": ["map.md"], "images": ["images.md"],
-    "car_rental": ["car_rental.md"], "food": ["food.md"], "packing": ["packing.md"],
+    "car_rental": ["car_rental.md"], "food": ["food.md"], "plan_b": ["plan_b.md"], "packing": ["packing.md"],
     "budget": ["budget.md"], "page": ["page_designer.md", "critic.md"],
 }
 
@@ -135,7 +141,8 @@ STAGE_LABELS = {
     "requirements": "Reikalavimai", "research": "Tyrimas", "weather": "Oras/sezonas",
     "accommodation": "Nakvynė", "itinerary": "Dienų planas", "logistics_report": "Logistika",
     "map_data": "Žemėlapis", "images": "Nuotraukos", "car_rental": "Auto nuoma",
-    "food": "Maistas ir barai", "forecast": "Orų prognozė", "packing": "Daiktai",
+    "food": "Maistas ir barai", "forecast": "Orų prognozė", "plan_b": "Planas B",
+    "packing": "Daiktai",
     "budget": "Biudžetas", "page": "Puslapis", "deploy_log": "Publikavimas",
 }
 
@@ -385,6 +392,12 @@ def run_from_stage(
                                        requirements.start_date).model_dump_json())
     forecast = TripForecast.model_validate_json(out["forecast"])
 
+    if must_run("plan_b"):
+        progress("Planas B blogam orui (alternatyvos ir kelių patikra)...")
+        with log_calls("plan_b", on_llm_call):
+            save("plan_b", run_plan_b(requirements_json, out["itinerary"], out["forecast"]).model_dump_json())
+    plan_b = PlanBChecked.model_validate_json(out["plan_b"])
+
     if must_run("packing"):
         progress("Daiktų sąrašas...")
         with log_calls("packing", on_llm_call):
@@ -419,6 +432,7 @@ def run_from_stage(
             "car_rental": car_rental.model_dump(),
             "food": food.model_dump(),
             "forecast": forecast.model_dump(),
+            "plan_b": plan_b.model_dump(),
             "packing": "rendered by code -- only place the <!-- PACKING_LIST --> placeholder",
         }
 

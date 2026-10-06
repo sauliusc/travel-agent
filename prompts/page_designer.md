@@ -35,6 +35,13 @@ Everything you receive has already been checked (routes validated, images verifi
   min-max temperature, chance of rain, wind. If a day's `source` is `climate`, say plainly
   it's the typical weather for those dates (the exact forecast appears ~2 weeks before the
   trip) -- don't call it a forecast. Also a one-line weather note in each day's section.
+- Plan B: at the end of each day whose `plan_b.days[*].needed` is true, a collapsed
+  `<details class="plan-b">` with `<summary>🌧 Planas B (jei blogas oras)</summary>`, closed by
+  default. Inside: `weather_sensitive`, the alternative's `title`, its stops with times and
+  notes, total driving (`plan_b.driving_minutes[day]`), the day route button(s) from
+  `plan_b.route_urls[day]` used exactly as given, and `tip`. Mention that it ends at the same
+  place as the main plan. If that day's forecast shows rain/strong wind, add a one-line hint
+  in the day header that Plan B may be the better choice. No Plan B block for other days.
 - "Ką pasiimti" section containing exactly the line `<!-- PACKING_LIST -->` and nothing
   else -- the checklist is inserted there automatically. Don't write your own list.
 - If `car_rental.needed`: a "Automobilio nuoma" section -- first `recommended_car_types`

@@ -18,7 +18,8 @@ Weather/Season, Review/Critic, Documentation, CI/CD. Papildomai: Car Rental (3 g
 vertinamos nuomos įmonės, jei nuomojamas automobilis) ir Food & Bars (pigios vietinės
 užeigos prie maršruto, regiono patiekalai su kaina ir nuotrauka, ypatingi barai), Orų
 prognozė (kodas, Open-Meteo: prognozė iki 16 d., toliau – daugiametis vidurkis) ir Packing
-Planner (daiktų sąrašas; checkbox'ai su localStorage generuojami kodu).
+Planner (daiktų sąrašas; checkbox'ai su localStorage generuojami kodu), Plan B (alternatyva
+blogam orui; kodas tikrina tą pačią pradžią/pabaigą, kelius ir vairavimo limitą).
 
 ## Technologijos
 
