@@ -1,15 +1,21 @@
 """Main orchestration flow: requirements -> research/weather -> accommodation ->
-itinerary -> logistics validation -> map/images/budget -> page -> critic loop ->
-CI/CD deploy.
+itinerary -> logistics gate -> map/images -> car rental/food -> forecast/packing ->
+budget -> page -> critic loop -> CI/CD deploy.
+
+Stages declare their inputs (STAGE_DEPS); a rerun reuses every stage whose
+inputs and prompt didn't change.
 
 All 14 agents from the design doc are wired in.
 """
 
+import hashlib
 import json
 import os
 import re
+from pathlib import Path
 
 from agents.accommodation import find as run_accommodation
+from agents.accommodation import update as update_accommodation
 from agents.base import log_calls
 from agents.budget import estimate as run_budget
 from agents.car_rental import find as run_car_rental
@@ -90,6 +96,60 @@ def _slugify(requirements) -> str:
     return f"{REPO_PREFIX}{slug}"
 
 
+# What each stage reads. A stage is rerun only when the outputs of these
+# stages (or its own prompt, or a stage-specific extra input) changed since
+# it last ran -- otherwise its stored result is reused. E.g. car_rental
+# depends only on the requirements, so an itinerary change doesn't redo it.
+STAGE_DEPS: dict[str, list[str]] = {
+    "requirements": [],
+    "research": ["requirements"],
+    "weather": ["requirements"],
+    "accommodation": ["requirements", "research"],
+    "itinerary": ["requirements", "research", "weather", "accommodation"],
+    "logistics_report": ["itinerary"],
+    "map_data": ["itinerary"],
+    "images": ["itinerary"],
+    "car_rental": ["requirements"],
+    "food": ["requirements", "itinerary", "accommodation"],
+    "forecast": ["requirements", "itinerary"],
+    "packing": ["requirements", "itinerary", "forecast", "car_rental"],
+    "budget": ["itinerary", "accommodation", "car_rental", "food"],
+    "page": ["requirements", "itinerary", "logistics_report", "budget", "map_data", "images",
+             "car_rental", "food", "forecast", "packing"],
+    "deploy_log": ["page", "images", "food"],
+}
+
+# Prompt files per stage: editing a prompt invalidates that stage's results.
+_PROMPTS = Path(__file__).parent / "prompts"
+STAGE_PROMPTS: dict[str, list[str]] = {
+    "requirements": ["requirements.md"], "research": ["research.md"], "weather": ["weather.md"],
+    "accommodation": ["accommodation.md"], "itinerary": ["itinerary.md"],
+    "logistics_report": ["logistics.md"], "map_data": ["map.md"], "images": ["images.md"],
+    "car_rental": ["car_rental.md"], "food": ["food.md"], "packing": ["packing.md"],
+    "budget": ["budget.md"], "page": ["page_designer.md", "critic.md"],
+}
+
+STAGE_LABELS = {
+    "requirements": "Reikalavimai", "research": "Tyrimas", "weather": "Oras/sezonas",
+    "accommodation": "Nakvynė", "itinerary": "Dienų planas", "logistics_report": "Logistika",
+    "map_data": "Žemėlapis", "images": "Nuotraukos", "car_rental": "Auto nuoma",
+    "food": "Maistas ir barai", "forecast": "Orų prognozė", "packing": "Daiktai",
+    "budget": "Biudžetas", "page": "Puslapis", "deploy_log": "Publikavimas",
+}
+
+FP_PREFIX = "_fp:"
+
+
+def _only_stops(itinerary: Itinerary, names: set[str]) -> Itinerary:
+    """The itinerary reduced to the given stops (days without any dropped)."""
+    days = []
+    for day in itinerary.days:
+        stops = [s for s in day.stops if s.name in names]
+        if stops:
+            days.append(day.model_copy(update={"stops": stops}))
+    return Itinerary(days=days)
+
+
 def run_from_stage(
     stage_name: str,
     cached_outputs: dict[str, str] | None = None,
@@ -99,187 +159,227 @@ def run_from_stage(
     modification: str | None = None,
     user_requirements: str | None = None,
 ) -> str:
-    """Run the pipeline starting at `stage_name`, reusing cached_outputs for
-    everything before it, and continue through to CI/CD deploy. Returns the
+    """Run the pipeline from `stage_name` to CI/CD deploy and return the
     published page's URL.
 
-    Every stage from `stage_name` onward is recomputed, since each stage
-    depends on the ones before it (e.g. a fresh itinerary means map/images/
-    budget/page must all be rebuilt too, even if this call started at
-    "itinerary" specifically).
+    Stages before `stage_name` are taken from cached_outputs. `stage_name`
+    itself always runs. Every later stage runs only if its inputs changed
+    (see STAGE_DEPS); otherwise its stored result is reused. The stored
+    fingerprints live next to the outputs as "_fp:<stage>" entries, so they
+    persist through on_stage_complete like any other stage output.
+
+    Within a stage that does run, work is reused where it's safe: images are
+    looked up only for stops that have no photo decision yet, and the
+    Logistics Validator gets the previous report so unchanged legs needn't be
+    re-checked.
 
     Args:
-        stage_name: one of STAGE_ORDER -- where to start (re)computing from
-        cached_outputs: previously persisted stage outputs (see
-            console/db.py's trip_stages), keyed by stage name -- required
-            for every stage strictly before `stage_name`
-        on_progress: see run_travel_planner
-        on_stage_complete: see run_travel_planner
-        on_llm_call: see run_travel_planner
-        modification: optional free-text instruction applied only when
-            `stage_name` is exactly "itinerary" -- routes through
-            agents.itinerary.fix() against the cached itinerary instead of
-            plan() from scratch, so a trip can be tweaked without
-            re-deriving the whole day plan
-        user_requirements: free-text trip request; required only when
-            `stage_name` is "requirements" (i.e. a full fresh run)
+        stage_name: one of STAGE_ORDER -- the stage to (re)run from
+        cached_outputs: persisted stage outputs (+ "_fp:" fingerprints)
+        on_progress / on_stage_complete / on_llm_call: see run_travel_planner
+        modification: free-text change to an existing trip. Applied to
+            accommodation (if it concerns lodging) and the itinerary, both of
+            which are then rerun; use stage_name="accommodation".
+        user_requirements: the original free-text trip request
     """
     if stage_name not in STAGE_ORDER:
         raise ValueError(f"Unknown stage {stage_name!r}, must be one of {STAGE_ORDER}")
 
-    cached_outputs = cached_outputs or {}
+    out: dict[str, str] = dict(cached_outputs or {})
     progress = on_progress or (lambda _msg: None)
     stage_done = on_stage_complete or (lambda _stage, _output: None)
     start_idx = STAGE_ORDER.index(stage_name)
-    recompute = False
+    forced = {stage_name}
+    if modification is not None:
+        forced |= {"accommodation", "itinerary"} & set(STAGE_ORDER[start_idx:])
+    extra = {
+        "requirements": user_requirements or "",
+        "car_rental": user_requirements or "",
+        "packing": user_requirements or "",
+    }
 
-    def reached(stage: str) -> bool:
-        nonlocal recompute
-        if not recompute and STAGE_ORDER.index(stage) >= start_idx:
-            recompute = True
-        return recompute
+    def fingerprint(stage: str) -> str:
+        h = hashlib.sha256(stage.encode())
+        for name in STAGE_PROMPTS.get(stage, []):
+            h.update(b"\0" + (_PROMPTS / name).read_bytes())
+        for dep in STAGE_DEPS[stage]:
+            h.update(b"\0" + out[dep].encode())
+        h.update(b"\0" + extra.get(stage, "").encode())
+        return h.hexdigest()
 
-    if reached("requirements"):
+    def must_run(stage: str) -> bool:
+        if STAGE_ORDER.index(stage) < start_idx:
+            if stage not in out:
+                raise ValueError(f"No stored result for stage {stage!r} -- run from an earlier stage")
+            return False
+        if stage in forced or stage not in out:
+            return True
+        if out.get(FP_PREFIX + stage) == fingerprint(stage):
+            progress(f"{STAGE_LABELS[stage]}: įvestis nepasikeitė -- naudojamas ankstesnis rezultatas.")
+            return False
+        return True
+
+    def save(stage: str, value: str) -> None:
+        out[stage] = value
+        stage_done(stage, value)
+        fp = fingerprint(stage)
+        out[FP_PREFIX + stage] = fp
+        stage_done(FP_PREFIX + stage, fp)
+
+    # --- requirements, research, weather -----------------------------------
+    if must_run("requirements"):
         if user_requirements is None:
             raise ValueError("user_requirements is required to (re)run the requirements stage")
         progress("Reikalavimų analizė...")
         with log_calls("requirements", on_llm_call):
-            requirements = run_requirements_analyst(user_requirements)
-        requirements_json = requirements.model_dump_json()
-        stage_done("requirements", requirements_json)
-    else:
-        requirements_json = cached_outputs["requirements"]
-        requirements = TripRequirements.model_validate_json(requirements_json)
+            save("requirements", run_requirements_analyst(user_requirements).model_dump_json())
+    requirements_json = out["requirements"]
+    requirements = TripRequirements.model_validate_json(requirements_json)
 
-    if reached("research"):
+    if must_run("research"):
         progress("Tyrimas (kelionės objektai, keliai, sezoniškumas)...")
         with log_calls("research", on_llm_call):
-            research = run_research(requirements_json)
-        stage_done("research", research)
-    else:
-        research = cached_outputs["research"]
+            save("research", run_research(requirements_json))
 
-    if reached("weather"):
+    if must_run("weather"):
         progress("Orų/sezono patikra...")
         with log_calls("weather", on_llm_call):
-            weather = run_weather(requirements_json)
-        stage_done("weather", weather)
-    else:
-        weather = cached_outputs["weather"]
+            save("weather", run_weather(requirements_json))
 
-    if reached("accommodation"):
-        progress("Nakvynės paieška...")
-        with log_calls("accommodation", on_llm_call):
-            accommodation = run_accommodation(f"requirements={requirements_json}\nresearch={research}")
-        stage_done("accommodation", accommodation)
-    else:
-        accommodation = cached_outputs["accommodation"]
+    # --- accommodation -----------------------------------------------------
+    if must_run("accommodation"):
+        if modification is not None and "accommodation" in out:
+            progress("Nakvynė: taikomas pataisymas...")
+            with log_calls("accommodation", on_llm_call):
+                update = update_accommodation(out["accommodation"], modification, requirements_json)
+            if not update.changed:
+                progress("Nakvynė: pataisymas nakvynės neliečia -- paliekama kaip buvo.")
+            save("accommodation", update.accommodation if update.changed else out["accommodation"])
+        else:
+            progress("Nakvynės paieška...")
+            with log_calls("accommodation", on_llm_call):
+                save("accommodation", run_accommodation(f"requirements={requirements_json}\nresearch={out['research']}"))
+    accommodation = out["accommodation"]
 
-    if reached("itinerary"):
-        if modification is not None and stage_name == "itinerary":
+    # --- itinerary + logistics gate ----------------------------------------
+    if must_run("itinerary"):
+        if modification is not None and "itinerary" in out:
             progress("Dienų plano koregavimas pagal nurodymą...")
             with log_calls("itinerary", on_llm_call):
-                itinerary = fix(cached_outputs["itinerary"], modification)
+                save("itinerary", fix(out["itinerary"], f"{modification}\n\nCurrent accommodation:\n{accommodation}"))
         else:
             progress("Dienų plano sudarymas...")
             with log_calls("itinerary", on_llm_call):
-                itinerary = plan(
-                    f"requirements={requirements_json}\nresearch={research}\n"
-                    f"weather={weather}\naccommodation={accommodation}"
-                )
-        stage_done("itinerary", itinerary)
-    else:
-        itinerary = cached_outputs["itinerary"]
+                save("itinerary", plan(
+                    f"requirements={requirements_json}\nresearch={out['research']}\n"
+                    f"weather={out['weather']}\naccommodation={accommodation}"
+                ))
 
-    def validate_until_ok(itinerary: str) -> tuple[str, LogisticsReport]:
+    def validate_until_ok(itinerary: str, previous: LogisticsReport | None) -> LogisticsReport:
         """Validate; on blockers let the planner rework the itinerary and
         re-validate, so only a fully confirmed itinerary moves on."""
         for attempt in range(MAX_LOGISTICS_FIXES + 1):
             progress("Logistikos patikra (važiavimo laikai, keliai)..." if attempt == 0
                      else f"Pakartotinė logistikos patikra ({attempt}/{MAX_LOGISTICS_FIXES})...")
             with log_calls("logistics_report", on_llm_call):
-                report = validate(itinerary)
-            stage_done("logistics_report", report.model_dump_json())
+                report = validate(itinerary, previous)
+            save("logistics_report", report.model_dump_json())
             if report.ok():
-                return itinerary, report
+                return report
             if attempt == MAX_LOGISTICS_FIXES:
                 break
             progress(f"Logistika rado {len(report.blockers())} problemą(-as) -- dienų planas perdaromas...")
             with log_calls("itinerary", on_llm_call):
                 itinerary = fix(itinerary, "Logistics Validator blockers:\n" + _blocker_text(report))
-            stage_done("itinerary", itinerary)
+            save("itinerary", itinerary)
+            previous = report
         raise LogisticsBlocked(
             f"Logistika nepatvirtino maršruto po {MAX_LOGISTICS_FIXES} perdarymų:\n"
             f"{_blocker_text(report)}\nPakoreguok kelionę per „Pataisyti“ ir paleisk iš naujo."
         )
 
-    if reached("logistics_report"):
-        itinerary, logistics_report = validate_until_ok(itinerary)
+    def previous_report() -> LogisticsReport | None:
+        if "logistics_report" not in out or "logistics_report" in forced:
+            return None
+        try:
+            return LogisticsReport.model_validate_json(out["logistics_report"])
+        except ValueError:  # free-text report from before the structured schema
+            return None
+
+    if must_run("logistics_report"):
+        logistics_report = validate_until_ok(out["itinerary"], previous_report())
     else:
-        logistics_report = LogisticsReport.model_validate_json(cached_outputs["logistics_report"])
+        logistics_report = LogisticsReport.model_validate_json(out["logistics_report"])
         if not logistics_report.ok():
             raise LogisticsBlocked(
                 "Išsaugota logistikos ataskaita turi neišspręstų problemų -- paleisk nuo „Logistika“:\n"
                 + _blocker_text(logistics_report)
             )
 
-    if reached("map_data"):
+    # --- map, images -------------------------------------------------------
+    if must_run("map_data"):
         progress("Žemėlapio duomenų ruošimas...")
         with log_calls("map_data", on_llm_call):
-            map_data = run_map(itinerary)
-        stage_done("map_data", map_data)
-    else:
-        map_data = cached_outputs["map_data"]
+            save("map_data", run_map(out["itinerary"]))
 
-    if reached("images"):
-        progress("Nuotraukų paieška...")
-        with log_calls("images", on_llm_call):
-            picks = run_images(itinerary)
-        progress("Nuotraukų atsisiuntimas ir licencijų patikra...")
-        images = download_images(picks)
-        if images.skipped:
-            progress(f"Praleista nuotraukų: {len(images.skipped)} ({'; '.join(f'{k}: {v}' for k, v in images.skipped.items())})")
-        stage_done("images", images.model_dump_json())
-    else:
-        images = ImageResults.model_validate_json(cached_outputs["images"])
-    # run_page_designer's context gets json.dumps'd, which can't serialize a
-    # Pydantic model directly -- pass the plain-dict form there, keep the
-    # typed ImageResults for run_cicd (which needs .images/.license, not a dict).
-    images_for_page = images.model_dump()
+    if must_run("images"):
+        itin = Itinerary.model_validate_json(out["itinerary"])
+        stop_names = {s.name for d in itin.days for s in d.stops}
+        prev = None
+        if "images" in out and "images" not in forced:
+            prev = ImageResults.model_validate_json(out["images"])
+        if prev is None:
+            todo, kept, skipped = stop_names, [], {}
+        else:
+            decided = {img.stop_name for img in prev.images} | set(prev.skipped)
+            todo = stop_names - decided
+            kept = [img for img in prev.images if img.stop_name in stop_names]
+            skipped = {k: v for k, v in prev.skipped.items() if k in stop_names}
+        if todo:
+            progress(f"Nuotraukų paieška ({len(todo)} vietoms)...")
+            with log_calls("images", on_llm_call):
+                picks = run_images(_only_stops(itin, todo).model_dump_json())
+            progress("Nuotraukų atsisiuntimas ir licencijų patikra...")
+            fresh = download_images(picks)
+            kept += fresh.images
+            skipped |= fresh.skipped
+            if fresh.skipped:
+                progress(f"Praleista nuotraukų: {len(fresh.skipped)} ({'; '.join(f'{k}: {v}' for k, v in fresh.skipped.items())})")
+        else:
+            progress("Nuotraukos: visoms vietoms jau yra -- nauja paieška nereikalinga.")
+        save("images", ImageResults(images=kept, skipped=skipped).model_dump_json())
+    images = ImageResults.model_validate_json(out["images"])
 
-    if reached("car_rental"):
+    # --- car rental, food, forecast, packing -------------------------------
+    if must_run("car_rental"):
         progress("Automobilio nuomos pasiūlymai...")
         with log_calls("car_rental", on_llm_call):
-            car_rental = run_car_rental(requirements_json, user_requirements or "")
-        if not car_rental.needed:
+            result = run_car_rental(requirements_json, user_requirements or "")
+        if not result.needed:
             progress("Automobilio nuoma šiai kelionei nereikalinga -- praleidžiama.")
-        stage_done("car_rental", car_rental.model_dump_json())
-    else:
-        car_rental = CarRentalResults.model_validate_json(cached_outputs["car_rental"])
+        save("car_rental", result.model_dump_json())
+    car_rental = CarRentalResults.model_validate_json(out["car_rental"])
 
-    if reached("food"):
+    if must_run("food"):
         progress("Maistas, vietiniai patiekalai ir barai...")
         with log_calls("food", on_llm_call):
-            food = run_food(requirements_json, itinerary, accommodation)
-        stage_done("food", food.model_dump_json())
-    else:
-        food = FoodGuide.model_validate_json(cached_outputs["food"])
+            save("food", run_food(requirements_json, out["itinerary"], accommodation).model_dump_json())
+    food = FoodGuide.model_validate_json(out["food"])
 
-    if reached("forecast"):
+    # Code only and cheap, and its input includes "today" (forecast vs climate),
+    # so it always runs; packing still reruns only if the result changed.
+    if STAGE_ORDER.index("forecast") >= start_idx:
         progress("Orų prognozė...")
-        forecast = trip_forecast(Itinerary.model_validate_json(itinerary), requirements.start_date)
-        stage_done("forecast", forecast.model_dump_json())
-    else:
-        forecast = TripForecast.model_validate_json(cached_outputs["forecast"])
+        save("forecast", trip_forecast(Itinerary.model_validate_json(out["itinerary"]),
+                                       requirements.start_date).model_dump_json())
+    forecast = TripForecast.model_validate_json(out["forecast"])
 
-    if reached("packing"):
+    if must_run("packing"):
         progress("Daiktų sąrašas...")
         with log_calls("packing", on_llm_call):
-            packing = run_packing(requirements_json, user_requirements or "", itinerary,
-                                  forecast.model_dump_json(), car_rental.needed)
-        stage_done("packing", packing.model_dump_json())
-    else:
-        packing = PackingList.model_validate_json(cached_outputs["packing"])
+            save("packing", run_packing(requirements_json, user_requirements or "", out["itinerary"],
+                                        out["forecast"], car_rental.needed).model_dump_json())
+    packing = PackingList.model_validate_json(out["packing"])
 
     # Stop photos and dish photos are shipped together.
     all_images = ImageResults(
@@ -287,26 +387,24 @@ def run_from_stage(
         skipped=images.skipped,
     )
 
-    if reached("budget"):
+    if must_run("budget"):
         progress("Biudžeto skaičiavimas...")
         with log_calls("budget", on_llm_call):
-            budget = run_budget({
-                "itinerary": itinerary, "accommodation": accommodation,
+            save("budget", run_budget({
+                "itinerary": out["itinerary"], "accommodation": accommodation,
                 "car_rental": car_rental.model_dump(), "food": food.model_dump(exclude={"dishes": {"__all__": {"image"}}}),
-            })
-        stage_done("budget", budget)
-    else:
-        budget = cached_outputs["budget"]
+            }))
 
+    # --- page, critic, deploy ----------------------------------------------
     def page_context() -> dict:
         return {
             "language": requirements.language,
-            "itinerary": itinerary,
-            "day_routes": day_routes(Itinerary.model_validate_json(itinerary)),
+            "itinerary": out["itinerary"],
+            "day_routes": day_routes(Itinerary.model_validate_json(out["itinerary"])),
             "logistics": _page_logistics(logistics_report),
-            "budget": budget,
-            "map_data": map_data,
-            "images": images_for_page,
+            "budget": out["budget"],
+            "map_data": out["map_data"],
+            "images": images.model_dump(),
             "car_rental": car_rental.model_dump(),
             "food": food.model_dump(),
             "forecast": forecast.model_dump(),
@@ -320,45 +418,37 @@ def run_from_stage(
         # works the same on every page regardless of the designer's markup.
         return inject_packing(run_page_designer(page_context()), packing, f"packing:{repo_name}")
 
-    page_freshly_built = reached("page")
-    if page_freshly_built:
+    if must_run("page"):
         progress("Puslapio generavimas...")
         with log_calls("page", on_llm_call):
-            page = design_page()
-        stage_done("page", page)
-    else:
-        page = cached_outputs["page"]
-
-    # Only worth re-critiquing a page we actually just (re)built -- if this
-    # call only touches deploy_log, the cached page already passed review.
-    if page_freshly_built:
+            save("page", design_page())
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
             with log_calls("critic", on_llm_call):
-                critique = review(page, itinerary, logistics_report.model_dump_json(), all_images.model_dump_json(),
+                critique = review(out["page"], out["itinerary"], logistics_report.model_dump_json(),
+                                  all_images.model_dump_json(),
                                   json.dumps(page_context()["day_routes"], ensure_ascii=False))
             if "no issues" in critique.lower() or "everything passes" in critique.lower():
                 break
             progress("Taisomos peržiūroje rastos problemos...")
             with log_calls("itinerary", on_llm_call):
-                itinerary = fix(itinerary, critique)
-            stage_done("itinerary", itinerary)
-            itinerary, logistics_report = validate_until_ok(itinerary)
+                save("itinerary", fix(out["itinerary"], critique))
+            logistics_report = validate_until_ok(out["itinerary"], logistics_report)
             with log_calls("page", on_llm_call):
-                page = design_page()
-            stage_done("page", page)
+                save("page", design_page())
 
-    progress("Repozitorijos kūrimas ir puslapio publikavimas...")
     owner = os.environ.get("GITHUB_OWNER", "sauliusc")
-    deploy_log = run_cicd(
-        owner=owner,
-        repo_name=repo_name,
-        description=f"{requirements.destination} trip page",
-        page_html=page,
-        images=all_images,
-    )
-    stage_done("deploy_log", deploy_log)
-    print(deploy_log)
+    if must_run("deploy_log"):
+        progress("Repozitorijos kūrimas ir puslapio publikavimas...")
+        deploy_log = run_cicd(
+            owner=owner,
+            repo_name=repo_name,
+            description=f"{requirements.destination} trip page",
+            page_html=out["page"],
+            images=all_images,
+        )
+        save("deploy_log", deploy_log)
+        print(deploy_log)
     return page_url(owner, repo_name)
 
 
