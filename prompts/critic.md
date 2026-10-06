@@ -32,6 +32,9 @@ Check, in order:
    with average prices.
 9. Weather: each day's weather matches `forecast`; climate-based days are presented as
    typical weather, not as a forecast. A packing checklist (`#packing-list`) is present.
+10. Plan B: every day with a needed Plan B has it in a collapsed `<details>` (closed by
+   default) at the end of that day, with its stops, driving and route button(s); no Plan B
+   for other days.
 
 For each issue found, name the exact agent/output responsible and what needs to change —
 do not just say "fix the timing," say which leg, which number, and what it should be

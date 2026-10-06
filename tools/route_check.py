@@ -50,13 +50,16 @@ def sample_along(coords: list[list[float]], n: int) -> list[tuple[float, float, 
     return out
 
 
-def check_leg(from_lat: float, from_lon: float, to_lat: float, to_lon: float, samples: int | None = None) -> str:
+def leg_check(from_lat: float, from_lon: float, to_lat: float, to_lon: float, samples: int | None = None) -> dict:
+    """Structured result: {"ok": bool, "km": float, "minutes": float, "text": str}.
+    `ok` is True only for LEG OK (paved/drivable at every sampled point)."""
     url = OSRM_URL.format(from_lon=from_lon, from_lat=from_lat, to_lon=to_lon, to_lat=to_lat)
     resp = httpx.get(url, params={"overview": "full", "geometries": "geojson"}, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != "Ok" or not data.get("routes"):
-        return f"LEG ERROR: no route found (OSRM: {data.get('code', 'unknown error')})"
+        text = f"LEG ERROR: no route found (OSRM: {data.get('code', 'unknown error')})"
+        return {"ok": False, "km": 0.0, "minutes": 0.0, "text": text}
 
     route = data["routes"][0]
     km, minutes = route["distance"] / 1000, route["duration"] / 60
@@ -66,7 +69,7 @@ def check_leg(from_lat: float, from_lon: float, to_lat: float, to_lon: float, sa
     ]
     if km < 2:
         lines.append("LEG OK: short in-town hop, no road-type sampling needed")
-        return "\n".join(lines)
+        return {"ok": True, "km": km, "minutes": minutes, "text": "\n".join(lines)}
 
     n = samples or max(3, min(15, round(km / 10)))
     points = sample_along(route["geometry"]["coordinates"], n)
@@ -79,7 +82,11 @@ def check_leg(from_lat: float, from_lon: float, to_lat: float, to_lon: float, sa
         f"LEG OK: all {n} sampled points on paved drivable road" if bad == 0
         else f"LEG WARNING: {bad}/{n} sampled points are not confirmed paved/drivable -- see lines above"
     )
-    return "\n".join(lines)
+    return {"ok": bad == 0, "km": km, "minutes": minutes, "text": "\n".join(lines)}
+
+
+def check_leg(from_lat: float, from_lon: float, to_lat: float, to_lon: float, samples: int | None = None) -> str:
+    return leg_check(from_lat, from_lon, to_lat, to_lon, samples)["text"]
 
 
 def main() -> None:
