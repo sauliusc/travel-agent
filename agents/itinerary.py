@@ -12,7 +12,9 @@ the itinerary. A `claude -p` call is a single synchronous turn -- there is no
 import json
 from pathlib import Path
 
-from agents.base import ClaudeCLIError, _invoke_claude
+from pydantic import BaseModel, Field
+
+from agents.base import ClaudeCLIError, _invoke_claude, run_structured
 from schemas.itinerary import Itinerary
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "itinerary.md").read_text()
@@ -63,6 +65,38 @@ def plan(combined_input_json: str) -> str:
     return _run(combined_input_json)
 
 
-def fix(itinerary_json: str, critic_issues: str) -> str:
-    """Re-plan an itinerary (as JSON) to address specific issues raised by the Critic agent."""
-    return _run(f"Current itinerary:\n{itinerary_json}\n\nIssues to fix:\n{critic_issues}")
+class ItineraryFix(BaseModel):
+    itinerary: Itinerary
+    changed_days: list[int] = Field(
+        description="numbers of every day whose content differs from the current itinerary, "
+        "including knock-on changes (e.g. the next day now starts from a different hotel)")
+    change_summary: str = Field(description="one or two sentences: what changed and on which days")
+
+
+FIX_RULES = (
+    "Change only what the issues/request require. Copy every other day exactly as it is in "
+    "the current itinerary -- same stops, times, notes, wording. List in `changed_days` every "
+    "day you changed, including knock-on changes; days not listed are restored from the "
+    "current itinerary automatically."
+)
+
+
+def fix(itinerary_json: str, issues: str) -> tuple[str, str]:
+    """Rework an itinerary to address issues (a traveller's change request,
+    logistics blockers or critic findings) with minimal change.
+
+    Returns (itinerary JSON, change summary). Days the agent didn't declare
+    as changed are restored from the current itinerary in code, so untouched
+    days are guaranteed identical -- not just asked to stay so.
+    """
+    current = Itinerary.model_validate_json(itinerary_json)
+    result = run_structured(
+        SYSTEM_PROMPT, [],
+        f"Current itinerary:\n{itinerary_json}\n\nIssues to fix:\n{issues}\n\n{FIX_RULES}\n\n{COMPLETION_RULE}",
+        ItineraryFix, timeout=TIMEOUT, disallowed_tools=["Bash", "WebSearch", "WebFetch"],
+    )
+    before = {d.number: d for d in current.days}
+    changed = set(result.changed_days)
+    days = [before[d.number] if d.number in before and d.number not in changed else d
+            for d in result.itinerary.days]
+    return Itinerary(days=days).model_dump_json(), result.change_summary

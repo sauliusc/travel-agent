@@ -18,3 +18,6 @@ Rules:
 
 Output a structured `Itinerary` (days, each with ordered stops carrying arrival/departure
 times, coordinates, and a Google Maps URL built from the coordinates).
+
+When given a current itinerary and issues to fix, change as little as possible: only the
+days the issues require (plus unavoidable knock-on changes), everything else identical.

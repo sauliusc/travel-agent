@@ -53,3 +53,31 @@ def design(context: dict) -> str:
     if text is None:
         raise ClaudeCLIError(f"claude JSON output missing 'result' field: {payload!r}")
     return extract_html(text)
+
+
+UPDATE_RULES = (
+    "You are updating an already published trip page, not designing a new one. Below are the "
+    "current page and the current data. Apply the listed changes and make every part of the "
+    "page match the current data, but keep the design -- colors, layout, CSS, JS, section "
+    "order -- and all wording that isn't affected exactly as it is. Keep the "
+    "<!-- PACKING_LIST --> line where it is."
+)
+
+
+def update(previous_html: str, context: dict, changes: str) -> str:
+    """Update an existing page for changed data, keeping its design and
+    unaffected text, instead of regenerating it from scratch."""
+    payload = _invoke_claude(
+        SYSTEM_PROMPT,
+        allowed_tools=[],
+        user_input=(
+            f"{UPDATE_RULES}\n\nChanges:\n{changes}\n\nCurrent data:\n"
+            f"{json.dumps(context, ensure_ascii=False)}\n\nCurrent page:\n{previous_html}\n\n{OUTPUT_RULE}"
+        ),
+        timeout=TIMEOUT,
+        disallowed_tools=["Bash", "Read", "Glob", "Grep", "WebSearch", "WebFetch"],
+    )
+    text = payload.get("result")
+    if text is None:
+        raise ClaudeCLIError(f"claude JSON output missing 'result' field: {payload!r}")
+    return extract_html(text)

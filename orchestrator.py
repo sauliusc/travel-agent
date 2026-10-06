@@ -29,6 +29,7 @@ from agents.itinerary import fix, plan
 from agents.logistics import validate
 from agents.map_agent import build_map_data as run_map
 from agents.page_designer import design as run_page_designer
+from agents.page_designer import update as update_page
 from agents.requirements import analyze as run_requirements_analyst
 from agents.research import research as run_research
 from agents.weather import check as run_weather
@@ -44,6 +45,7 @@ from tools.image_download import download_images
 from tools.forecast import trip_forecast
 from tools.maps_links import day_routes
 from tools.packing_html import inject as inject_packing
+from tools.packing_html import to_template
 
 REPO_PREFIX = "ai-trip-"
 
@@ -219,7 +221,13 @@ def run_from_stage(
             return False
         return True
 
+    # What changed in this run, for the Page Designer's update mode.
+    changes: list[str] = []
+    changed_stages: list[str] = []
+
     def save(stage: str, value: str) -> None:
+        if out.get(stage) != value and stage not in changed_stages:
+            changed_stages.append(stage)
         out[stage] = value
         stage_done(stage, value)
         fp = fingerprint(stage)
@@ -266,7 +274,9 @@ def run_from_stage(
         if modification is not None and "itinerary" in out:
             progress("Dienų plano koregavimas pagal nurodymą...")
             with log_calls("itinerary", on_llm_call):
-                save("itinerary", fix(out["itinerary"], f"{modification}\n\nCurrent accommodation:\n{accommodation}"))
+                new_itinerary, summary = fix(out["itinerary"], f"{modification}\n\nCurrent accommodation:\n{accommodation}")
+            save("itinerary", new_itinerary)
+            changes += [f"Traveller's change request: {modification}", f"Itinerary: {summary}"]
         else:
             progress("Dienų plano sudarymas...")
             with log_calls("itinerary", on_llm_call):
@@ -290,8 +300,9 @@ def run_from_stage(
                 break
             progress(f"Logistika rado {len(report.blockers())} problemą(-as) -- dienų planas perdaromas...")
             with log_calls("itinerary", on_llm_call):
-                itinerary = fix(itinerary, "Logistics Validator blockers:\n" + _blocker_text(report))
+                itinerary, summary = fix(itinerary, "Logistics Validator blockers:\n" + _blocker_text(report))
             save("itinerary", itinerary)
+            changes.append(f"Itinerary (logistics fix): {summary}")
             previous = report
         raise LogisticsBlocked(
             f"Logistika nepatvirtino maršruto po {MAX_LOGISTICS_FIXES} perdarymų:\n"
@@ -413,15 +424,25 @@ def run_from_stage(
 
     repo_name = _slugify(requirements)
 
-    def design_page() -> str:
-        # The checklist (checkboxes + localStorage) is rendered by code, so it
-        # works the same on every page regardless of the designer's markup.
-        return inject_packing(run_page_designer(page_context()), packing, f"packing:{repo_name}")
+    def design_page(update_notes: list[str] | None) -> str:
+        """Generate the page, or -- with update_notes and an existing page --
+        update that page in place so its design and untouched text stay put.
+        The checklist (checkboxes + localStorage) is rendered by code either way."""
+        template = to_template(out["page"]) if update_notes is not None and "page" in out else None
+        if template is None:
+            html = run_page_designer(page_context())
+        else:
+            labels = ", ".join(STAGE_LABELS.get(st, st) for st in changed_stages if st in STAGE_LABELS) or "-"
+            html = update_page(template, page_context(), "\n".join([*update_notes, f"Updated data: {labels}"]))
+        return inject_packing(html, packing, f"packing:{repo_name}")
 
     if must_run("page"):
-        progress("Puslapio generavimas...")
+        # A manual "↻ Puslapis" redesigns from scratch; any other rerun updates
+        # the existing page so the trip page doesn't change look on every tweak.
+        full = "page" in forced or to_template(out.get("page", "")) is None
+        progress("Puslapio generavimas..." if full else "Puslapio atnaujinimas (dizainas išlaikomas)...")
         with log_calls("page", on_llm_call):
-            save("page", design_page())
+            save("page", design_page(None if full else changes))
         for attempt in range(MAX_FIX_ITERATIONS):
             progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
             with log_calls("critic", on_llm_call):
@@ -432,10 +453,11 @@ def run_from_stage(
                 break
             progress("Taisomos peržiūroje rastos problemos...")
             with log_calls("itinerary", on_llm_call):
-                save("itinerary", fix(out["itinerary"], critique))
+                new_itinerary, summary = fix(out["itinerary"], critique)
+            save("itinerary", new_itinerary)
             logistics_report = validate_until_ok(out["itinerary"], logistics_report)
             with log_calls("page", on_llm_call):
-                save("page", design_page())
+                save("page", design_page([f"Fix these review findings:\n{critique}", f"Itinerary: {summary}"]))
 
     owner = os.environ.get("GITHUB_OWNER", "sauliusc")
     if must_run("deploy_log"):
