@@ -36,6 +36,11 @@ Check, in order:
    default) at the end of that day, with its stops, driving and route button(s); no Plan B
    for other days.
 
-For each issue found, name the exact agent/output responsible and what needs to change —
-do not just say "fix the timing," say which leg, which number, and what it should be
-instead. If everything passes, say so explicitly; do not invent issues to seem thorough.
+Image paths, day-route URLs, the packing placeholder and the presence of every
+`traveler_tips` entry are already checked by code -- don't spend effort re-listing them.
+
+Return only the issues (an empty list if everything passes; do not list passed checks or
+invent issues to seem thorough). For each: `target` -- `page` if editing the HTML alone fixes
+it, `itinerary` only if the plan data is wrong; `severity` -- `blocker` if a traveller would
+be misled, sent to the wrong place, onto an unsafe road, or the times are off by more than
+15 minutes, otherwise `minor`; and an exact `fix`: which leg, which number, what it should be.
