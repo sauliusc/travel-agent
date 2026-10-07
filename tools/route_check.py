@@ -51,15 +51,16 @@ def sample_along(coords: list[list[float]], n: int) -> list[tuple[float, float, 
 
 
 def leg_check(from_lat: float, from_lon: float, to_lat: float, to_lon: float, samples: int | None = None) -> dict:
-    """Structured result: {"ok": bool, "km": float, "minutes": float, "text": str}.
-    `ok` is True only for LEG OK (paved/drivable at every sampled point)."""
+    """Structured result: {"ok", "status", "km", "minutes", "text"}. status is
+    "ok" (paved/drivable at every sampled point), "unsafe" (some point isn't, or
+    no route) or "unknown" (road data service unreachable for some point)."""
     url = OSRM_URL.format(from_lon=from_lon, from_lat=from_lat, to_lon=to_lon, to_lat=to_lat)
     resp = httpx.get(url, params={"overview": "full", "geometries": "geojson"}, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != "Ok" or not data.get("routes"):
         text = f"LEG ERROR: no route found (OSRM: {data.get('code', 'unknown error')})"
-        return {"ok": False, "km": 0.0, "minutes": 0.0, "text": text}
+        return {"ok": False, "status": "unsafe", "km": 0.0, "minutes": 0.0, "text": text}
 
     route = data["routes"][0]
     km, minutes = route["distance"] / 1000, route["duration"] / 60
@@ -69,20 +70,29 @@ def leg_check(from_lat: float, from_lon: float, to_lat: float, to_lon: float, sa
     ]
     if km < 2:
         lines.append("LEG OK: short in-town hop, no road-type sampling needed")
-        return {"ok": True, "km": km, "minutes": minutes, "text": "\n".join(lines)}
+        return {"ok": True, "status": "ok", "km": km, "minutes": minutes, "text": "\n".join(lines)}
 
     n = samples or max(3, min(15, round(km / 10)))
     points = sample_along(route["geometry"]["coordinates"], n)
     verdicts = road_types([(lat, lon) for lat, lon, _ in points])
-    bad = 0
+    warn = unknown = 0
     for (lat, lon, at_km), verdict in zip(points, verdicts):
         lines.append(f"  km {at_km:5.1f} ({lat}, {lon}): {verdict}")
-        bad += not verdict.startswith("OK")
-    lines.append(
-        f"LEG OK: all {n} sampled points on paved drivable road" if bad == 0
-        else f"LEG WARNING: {bad}/{n} sampled points are not confirmed paved/drivable -- see lines above"
-    )
-    return {"ok": bad == 0, "km": km, "minutes": minutes, "text": "\n".join(lines)}
+        warn += verdict.startswith("WARNING")
+        unknown += verdict.startswith("ERROR")
+    # Unsafe (a WARNING) and unknown (road-data service unreachable) are
+    # different findings: the first needs a different route, the second just
+    # a later retry.
+    if warn:
+        status = "unsafe"
+        lines.append(f"LEG WARNING: {warn}/{n} sampled points are not paved/drivable -- see lines above")
+    elif unknown:
+        status = "unknown"
+        lines.append(f"LEG UNKNOWN: road data service unreachable for {unknown}/{n} points -- not checked, retry later")
+    else:
+        status = "ok"
+        lines.append(f"LEG OK: all {n} sampled points on paved drivable road")
+    return {"ok": status == "ok", "status": status, "km": km, "minutes": minutes, "text": "\n".join(lines)}
 
 
 def check_leg(from_lat: float, from_lon: float, to_lat: float, to_lon: float, samples: int | None = None) -> str:
