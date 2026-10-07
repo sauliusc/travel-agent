@@ -7,14 +7,15 @@ mistake, and its relatives, never reach a generated page again.
 
 from pathlib import Path
 
-from agents.base import run_agent
+from agents.base import run_structured
+from schemas.review import Review
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "critic.md").read_text()
 
 MAX_FIX_ITERATIONS = 3
 
 
-def review(page_html: str, itinerary_json: str, logistics_report_json: str, images_manifest_json: str, day_routes_json: str) -> str:
+def review(page_html: str, itinerary_json: str, logistics_report_json: str, images_manifest_json: str, day_routes_json: str, already_fixed: str = "") -> Review:
     """Review a generated page and itinerary for logistics/consistency errors.
 
     Args:
@@ -30,4 +31,7 @@ def review(page_html: str, itinerary_json: str, logistics_report_json: str, imag
         f"Verified image manifest:\n{images_manifest_json}\n\n"
         f"Day route links (day_routes):\n{day_routes_json}"
     )
-    return run_agent(SYSTEM_PROMPT, [], task)
+    if already_fixed:
+        task += ("\n\nAlready fixed in an earlier round -- check they are resolved, "
+                 f"do not re-report them unless still wrong:\n{already_fixed}")
+    return run_structured(SYSTEM_PROMPT, [], task, Review)

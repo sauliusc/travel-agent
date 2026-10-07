@@ -22,6 +22,8 @@ from agents.car_rental import find as run_car_rental
 from agents.cicd import deploy as run_cicd
 from agents.cicd import page_url
 from agents.critic import MAX_FIX_ITERATIONS, review
+from schemas.review import issues_text
+from tools.page_checks import check_page
 from agents.food import guide as run_food
 from agents.packing import plan as run_packing
 from agents.plan_b import build as run_plan_b
@@ -457,21 +459,41 @@ def run_from_stage(
         progress("Puslapio generavimas..." if full else "Puslapio atnaujinimas (dizainas išlaikomas)...")
         with log_calls("page", on_llm_call):
             save("page", design_page(None if full else changes))
+        # Code checks first (free), then the critic. Page-only findings update
+        # the page alone; only itinerary blockers rework the plan + logistics.
+        # Minor findings never start a round -- they ride along with the next update.
+        fixed: list[str] = []
         for attempt in range(MAX_FIX_ITERATIONS):
-            progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
-            with log_calls("critic", on_llm_call):
-                critique = review(out["page"], out["itinerary"], logistics_report.model_dump_json(),
-                                  all_images.model_dump_json(),
-                                  json.dumps(page_context()["day_routes"], ensure_ascii=False))
-            if "no issues" in critique.lower() or "everything passes" in critique.lower():
-                break
-            progress("Taisomos peržiūroje rastos problemos...")
-            with log_calls("itinerary", on_llm_call):
-                new_itinerary, summary = fix(out["itinerary"], critique)
-            save("itinerary", new_itinerary)
-            logistics_report = validate_until_ok(out["itinerary"], logistics_report)
+            code_problems = check_page(out["page"], {i.local_path for i in all_images.images},
+                                       page_context()["day_routes"], logistics_report.traveler_tips)
+            if code_problems:
+                progress(f"Puslapio patikra rado {len(code_problems)} netikslumų - taisomas tik puslapis...")
+                notes = "\n".join(f"- {p}" for p in code_problems)
+            else:
+                progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
+                with log_calls("critic", on_llm_call):
+                    result = review(out["page"], out["itinerary"], logistics_report.model_dump_json(),
+                                    all_images.model_dump_json(),
+                                    json.dumps(page_context()["day_routes"], ensure_ascii=False),
+                                    "\n".join(fixed))
+                if not result.blockers():
+                    if result.issues:
+                        progress(f"Peržiūra: {len(result.issues)} smulkių pastabų, puslapis tinkamas.")
+                    break
+                notes = issues_text(result.issues)
+                fixed.append(notes)
+                itinerary_issues = [i for i in result.blockers() if i.target == "itinerary"]
+                if itinerary_issues:
+                    progress("Taisomas dienų planas pagal peržiūrą...")
+                    with log_calls("itinerary", on_llm_call):
+                        new_itinerary, summary = fix(out["itinerary"], issues_text(itinerary_issues))
+                    save("itinerary", new_itinerary)
+                    logistics_report = validate_until_ok(out["itinerary"], logistics_report)
+                    notes += f"\nItinerary: {summary}"
+                else:
+                    progress("Taisomas tik puslapis pagal peržiūrą...")
             with log_calls("page", on_llm_call):
-                save("page", design_page([f"Fix these review findings:\n{critique}", f"Itinerary: {summary}"]))
+                save("page", design_page([f"Fix these review findings:\n{notes}"]))
 
     owner = os.environ.get("GITHUB_OWNER", "sauliusc")
     if must_run("deploy_log"):
