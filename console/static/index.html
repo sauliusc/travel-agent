@@ -21,6 +21,8 @@
   #sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
   #sidebar-header h1 { font-size: 16px; margin: 0 0 12px; font-weight: 600; }
   #new-trip-btn { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  #agents-link { display: block; margin-top: 10px; font-size: 13px; color: var(--accent-2); text-decoration: none; }
+  #agents-link:hover { text-decoration: underline; }
   #new-trip-btn:hover { background: var(--accent-2); }
 
   #trip-list { flex: 1; overflow-y: auto; padding: 8px; }
@@ -147,6 +149,7 @@
     <div id="sidebar-header">
       <h1>🧭 Kelionių planuotojas</h1>
       <button id="new-trip-btn" onclick="showComposer()">+ Nauja kelionė</button>
+      <a id="agents-link" href="/agents">🤖 Agentai: modeliai ir užduotys →</a>
     </div>
     <div id="trip-list" hx-get="/trips/list" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
   </aside>
@@ -580,6 +583,8 @@ async function deleteTrip(tripId) {
   htmx.trigger('#trip-list', 'load');
   if (currentTripId === tripId) showComposer();
 }
+// /agents links to a trip as /#<trip id>.
+if (location.hash.length > 1) openTrip(decodeURIComponent(location.hash.slice(1)));
 </script>
 </body>
 </html>

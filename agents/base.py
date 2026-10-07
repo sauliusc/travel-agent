@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -149,6 +150,20 @@ class ClaudeCLIError(RuntimeError):
     """Raised when the claude CLI exits non-zero or returns malformed output."""
 
 
+_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+
+
+def _prompt_file(system_prompt: str) -> str | None:
+    """Which prompts/*.md the system prompt is (agents read them verbatim)."""
+    for path in sorted(_PROMPTS_DIR.glob("*.md")):
+        try:
+            if path.read_text() == system_prompt:
+                return path.name
+        except OSError:
+            pass
+    return None
+
+
 def _invoke_claude(
     system_prompt: str,
     allowed_tools: list[str],
@@ -194,9 +209,39 @@ def _invoke_claude(
         + (f" {' '.join(extra_args)}" if extra_args else "")
     )
 
-    def _record(response_text: str) -> None:
+    schema_title = None
+    if extra_args and "--json-schema" in extra_args:
+        try:
+            schema_title = json.loads(extra_args[extra_args.index("--json-schema") + 1]).get("title")
+        except (ValueError, IndexError, AttributeError):
+            pass
+    started = time.monotonic()
+
+    def _record(response_text: str, payload: dict | None = None) -> None:
         sink = _call_sink.get()
-        if sink is not None:
+        if sink is None:
+            return
+        # How the agent was actually invoked -- shown on the console's
+        # /agents page. The model comes from claude's own report of what
+        # served the call (modelUsage), not from a guess.
+        meta = {
+            "models": sorted((payload or {}).get("modelUsage", {}) or {}),
+            "model_flag": next((extra_args[i + 1] for i, a in enumerate(extra_args or []) if a == "--model"), None),
+            "prompt_file": _prompt_file(system_prompt),
+            "allowed_tools": allowed_tools,
+            "disallowed_tools": ALWAYS_DISALLOWED + (disallowed_tools or []),
+            "permission_mode": permission_mode,
+            "timeout": timeout,
+            "schema": schema_title,
+            "duration_s": round(time.monotonic() - started, 1),
+            "ok": payload is not None and not payload.get("is_error"),
+            "num_turns": (payload or {}).get("num_turns"),
+            "cost_usd": (payload or {}).get("total_cost_usd"),
+            "user_input": user_input,
+        }
+        try:
+            sink.on_llm_call(sink.stage, query, response_text, meta)
+        except TypeError:  # older 3-argument callbacks
             sink.on_llm_call(sink.stage, query, response_text)
 
     try:
@@ -230,7 +275,7 @@ def _invoke_claude(
     # Full raw JSON response (not just "result"), so a structured-output
     # call (e.g. requirements.py, images.py) still shows something useful
     # even when "result" itself is empty/absent.
-    _record(result.stdout)
+    _record(result.stdout, payload)
     return payload
 
 

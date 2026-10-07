@@ -4,6 +4,8 @@ Run with: uvicorn console.app:app --host 127.0.0.1 --port 8000
 """
 
 import asyncio
+import importlib
+import json
 import html
 import logging
 import uuid
@@ -14,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
 from console import config, db
-from orchestrator import STAGE_ORDER, run_from_stage, run_travel_planner
+from orchestrator import STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
 
 app = FastAPI(title="Travel planning console")
 
@@ -78,7 +80,7 @@ def _run_pipeline(
             cached_outputs=cached_outputs,
             on_progress=log,
             on_stage_complete=lambda stage, output: db.save_stage_output(trip_id, stage, output),
-            on_llm_call=lambda stage, query, response: db.save_agent_call(trip_id, stage, query, response),
+            on_llm_call=lambda stage, query, response, meta=None: db.save_agent_call(trip_id, stage, query, response, meta),
             modification=modification,
             user_requirements=requirements_text,
         )
@@ -257,3 +259,53 @@ def trip_stage_calls(trip_id: str, stage: str):
         raise HTTPException(404, "Trip not found")
     calls = db.get_agent_calls(trip_id, stage=stage)
     return [dict(row) for row in calls]
+
+
+# --- /agents: what each agent is and how it was actually invoked ----------
+# Stages that call an LLM agent (map_data, forecast, deploy_log are code),
+# with the agents/ module implementing each.
+AGENT_MODULES = {
+    "requirements": "requirements", "research": "research", "weather": "weather",
+    "accommodation": "accommodation", "itinerary": "itinerary", "logistics_report": "logistics",
+    "images": "images", "car_rental": "car_rental", "food": "food", "plan_b": "plan_b",
+    "packing": "packing", "budget": "budget", "page": "page_designer", "critic": "critic",
+}
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+
+
+def _agent_description(module: str) -> str:
+    try:
+        doc = importlib.import_module(f"agents.{module}").__doc__ or ""
+    except Exception:
+        return ""
+    return doc.strip().split("\n\n")[0].replace("\n", " ")
+
+
+@app.get("/agents", response_class=HTMLResponse)
+def agents_page():
+    return FileResponse(STATIC_DIR / "agents.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/agents")
+def agents_overview():
+    stats = {row["stage"]: row for row in db.get_agent_overview()}
+    out = []
+    for stage, module in AGENT_MODULES.items():
+        prompt_file = ("critic.md" if stage == "critic" else (STAGE_PROMPTS.get(stage) or [None])[0])
+        prompt = (PROMPTS_DIR / prompt_file).read_text() if prompt_file and (PROMPTS_DIR / prompt_file).exists() else ""
+        st = stats.get(stage, {})
+        out.append({
+            "stage": stage, "label": STAGE_LABELS.get(stage, "Peržiūra" if stage == "critic" else stage),
+            "module": f"agents/{module}.py", "description": _agent_description(module),
+            "prompt_file": prompt_file, "prompt": prompt,
+            "count": st.get("count", 0), "last_at": st.get("last_at"), "meta": st.get("meta"),
+        })
+    return out
+
+
+@app.get("/api/agents/{stage}/calls")
+def agent_calls(stage: str, limit: int = 20):
+    rows = db.get_recent_agent_calls(stage, min(limit, 100))
+    return [{**{k: r[k] for k in ("id", "trip_id", "created_at", "query", "response")},
+             "trip": (r["requirements_text"] or "")[:120],
+             "meta": json.loads(r["meta"]) if r["meta"] else None} for r in rows]
