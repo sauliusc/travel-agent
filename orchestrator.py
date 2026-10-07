@@ -30,7 +30,6 @@ from agents.plan_b import build as run_plan_b
 from agents.images import fetch_images as run_images
 from agents.itinerary import fix, plan
 from agents.logistics import validate
-from agents.map_agent import build_map_data as run_map
 from agents.page_designer import design as run_page_designer
 from agents.page_designer import update as update_page
 from agents.requirements import analyze as run_requirements_analyst
@@ -49,7 +48,9 @@ from tools.image_download import download_images
 from tools.forecast import trip_forecast
 from tools.maps_links import day_routes
 from tools.packing_html import inject as inject_packing
-from tools.packing_html import to_template
+from tools.packing_html import to_template as _packing_template
+from tools.map_html import inject as inject_map, map_data
+from tools.map_html import to_template as _map_template
 
 REPO_PREFIX = "ai-trip-"
 
@@ -58,6 +59,12 @@ REPO_PREFIX = "ai-trip-"
 # reach the page as a "warning" -- travellers can't act on uncertainty.
 MAX_LOGISTICS_FIXES = 2
 
+
+
+def to_template(page_html: str) -> str | None:
+    """Page with code-rendered blocks (packing list, map) back as placeholders."""
+    t = _packing_template(page_html)
+    return None if t is None else _map_template(t)
 
 class LogisticsBlocked(RuntimeError):
     """The itinerary still has logistics blockers after MAX_LOGISTICS_FIXES reworks."""
@@ -134,7 +141,7 @@ _PROMPTS = Path(__file__).parent / "prompts"
 STAGE_PROMPTS: dict[str, list[str]] = {
     "requirements": ["requirements.md"], "research": ["research.md"], "weather": ["weather.md"],
     "accommodation": ["accommodation.md"], "itinerary": ["itinerary.md"],
-    "logistics_report": ["logistics.md"], "map_data": ["map.md"], "images": ["images.md"],
+    "logistics_report": ["logistics.md"], "images": ["images.md"],
     "car_rental": ["car_rental.md"], "food": ["food.md"], "plan_b": ["plan_b.md"], "packing": ["packing.md"],
     "budget": ["budget.md"], "page": ["page_designer.md", "critic.md"],
 }
@@ -338,9 +345,9 @@ def run_from_stage(
 
     # --- map, images -------------------------------------------------------
     if must_run("map_data"):
+        # Built from the itinerary by code -- no agent call.
         progress("Žemėlapio duomenų ruošimas...")
-        with log_calls("map_data", on_llm_call):
-            save("map_data", run_map(out["itinerary"]))
+        save("map_data", json.dumps(map_data(Itinerary.model_validate_json(out["itinerary"])), ensure_ascii=False))
 
     if must_run("images"):
         itin = Itinerary.model_validate_json(out["itinerary"])
@@ -429,7 +436,7 @@ def run_from_stage(
             "day_routes": day_routes(Itinerary.model_validate_json(out["itinerary"])),
             "logistics": _page_logistics(logistics_report),
             "budget": out["budget"],
-            "map_data": out["map_data"],
+            "map_data": "rendered by code -- only place the <!-- TRIP_MAP --> placeholder",
             "images": images.model_dump(),
             "car_rental": car_rental.model_dump(),
             "food": food.model_dump(),
@@ -449,7 +456,11 @@ def run_from_stage(
             html = run_page_designer(page_context())
         else:
             labels = ", ".join(STAGE_LABELS.get(st, st) for st in changed_stages if st in STAGE_LABELS) or "-"
+            if "<!-- TRIP_MAP -->" not in template:
+                update_notes = [*update_notes, "Replace the whole map (its container, Leaflet <link>/<script> "
+                                "and map JS) with the single line <!-- TRIP_MAP --> -- the map is now rendered by code."]
             html = update_page(template, page_context(), "\n".join([*update_notes, f"Updated data: {labels}"]))
+        html = inject_map(html, map_data(Itinerary.model_validate_json(out["itinerary"])))
         return inject_packing(html, packing, f"packing:{repo_name}")
 
     if must_run("page"):
