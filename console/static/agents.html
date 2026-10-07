@@ -45,6 +45,7 @@
   .call-head a { color: var(--accent-2); }
   .st { font-weight: 600; }
   .st.ok { color: var(--ok); } .st.err { color: var(--err); }
+  code { white-space: nowrap; }
   .empty { color: var(--text-dim); font-size: 13px; }
   @media (max-width: 700px) {
     header, main { padding-left: 16px; padding-right: 16px; }
@@ -76,7 +77,7 @@ async function load() {
     const model = modelText(a.meta);
     return `<button class="agent" data-stage="${a.stage}" onclick="openAgent('${a.stage}')">
       <div class="name">${esc(a.label)}<span class="count">${a.count} kviet.</span></div>
-      <div class="model ${model ? '' : 'none'}">${model ? esc(model) : 'dar nekviestas'}</div>
+      <div class="model ${model ? '' : 'none'}">${model ? esc(model) : (a.count ? 'modelis nežinomas (seni įrašai)' : 'dar nekviestas')}</div>
     </button>`;
   }).join('');
   const want = location.hash.slice(1);
@@ -94,7 +95,7 @@ async function openAgent(stage) {
       <h2>${esc(a.label)}</h2>
       <p class="desc">${esc(a.description)}</p>
       <dl>
-        <dt>AI modelis</dt><dd>${m && modelText(m) ? chips(m.models, 'model') : '<span class="empty">dar nekviestas</span>'}${m && m.model_flag ? ` <span class="empty">(--model ${esc(m.model_flag)})</span>` : (m ? ' <span class="empty">(CLI numatytasis)</span>' : '')}</dd>
+        <dt>AI modelis</dt><dd>${m && modelText(m) ? chips(m.models, 'model') : `<span class="empty">${a.count ? 'nežinomas – įrašai iš prieš atnaujinimą' : 'dar nekviestas'}</span>`}${m && m.model_flag ? ` <span class="empty">(--model ${esc(m.model_flag)})</span>` : (m ? ' <span class="empty">(CLI numatytasis)</span>' : '')}</dd>
         <dt>Kodas</dt><dd><code>${esc(a.module)}</code></dd>
         <dt>Sistemos promptas</dt><dd><code>prompts/${esc(a.prompt_file || '–')}</code></dd>
         <dt>Leidžiami įrankiai</dt><dd>${m ? chips(m.allowed_tools) : '–'}</dd>
