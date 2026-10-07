@@ -11,7 +11,7 @@ Check, in order:
    to the available time between them?
 3. Does the last day leave at least 2 hours between arrival at the airport and the return
    flight?
-4. Do the map's coordinates for each stop match the text description (no obvious
+4. The map is rendered by code from the itinerary's coordinates. Do the itinerary's coordinates for each stop match the text description (no obvious
    mismatches, e.g. a "Vlorë" stop plotted at Durrës's coordinates)?
 5. Images: you receive the verified image manifest. Every file in it was downloaded by
    the pipeline and will ship with the page (do not look for them on this machine's

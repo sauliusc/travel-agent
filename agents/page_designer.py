@@ -60,7 +60,7 @@ UPDATE_RULES = (
     "current page and the current data. Apply the listed changes and make every part of the "
     "page match the current data, but keep the design -- colors, layout, CSS, JS, section "
     "order -- and all wording that isn't affected exactly as it is. Keep the "
-    "<!-- PACKING_LIST --> line where it is."
+    "<!-- PACKING_LIST --> and <!-- TRIP_MAP --> lines where they are."
 )
 
 

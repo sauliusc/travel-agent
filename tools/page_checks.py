@@ -27,6 +27,10 @@ def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], tr
                 problems.append(f"Day {route['day']}: the day-route button must link exactly to {url}")
     if "<!-- PACKING_LIST" not in page_html:
         problems.append("The <!-- PACKING_LIST --> placeholder is missing -- put it back in the packing section")
+    if "<!-- TRIP_MAP" not in page_html:
+        problems.append("The <!-- TRIP_MAP --> placeholder is missing -- put it in the map section")
+    if "L.map(" in page_html.split("<!-- TRIP_MAP:START -->")[0] + page_html.split("<!-- TRIP_MAP:END -->")[-1]:
+        problems.append("Remove the hand-written Leaflet map code -- the map is rendered by code at <!-- TRIP_MAP -->")
     text = _norm(page_html)
     for tip in traveler_tips:
         if _norm(tip) not in text:

@@ -27,7 +27,9 @@ Everything you receive has already been checked (routes validated, images verifi
   Google Maps (e.g. "🧭 Dienos maršrutas Google Maps"), using that day's URL from
   `day_routes` exactly as given, `target="_blank"`. If a day has several URLs, show one
   button per part ("1 dalis", "2 dalis"); if it has none, show no button.
-- A Leaflet.js map using `map_data`.
+- A map section ("🗺️ Žemėlapis"): put only the line `<!-- TRIP_MAP -->` where the map goes.
+  The map (Leaflet, markers with place-name tooltips, day routes) is rendered by code --
+  don't load Leaflet or write any map JS/CSS yourself.
 - Photos: use only entries in `images.images`, by their exact `local_path`. Under each,
   a small credit: author, license, link to `source_url`. A stop with no image has no photo.
   Lightbox: pure CSS + JS, click `.spot-thumb` to open fullscreen, no library.
