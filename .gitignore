@@ -8,3 +8,4 @@ console.db
 .pytest_cache/
 .DS_Store
 image_cache/
+road_cache.json

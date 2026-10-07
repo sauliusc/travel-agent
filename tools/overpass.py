@@ -10,8 +10,10 @@ Callable both as a Python function and as a CLI script, so the agent
 """
 
 import argparse
+import json
 import math
 import time
+from pathlib import Path
 
 import httpx
 
@@ -149,21 +151,58 @@ def _dist_to_way(lat: float, lon: float, geom: list[dict]) -> float:
     return best
 
 
+# Classifications already obtained, keyed by point (~10 m) + radius, so a road
+# checked once -- by the Logistics Validator, Plan B or route_check -- isn't
+# queried again. Overpass is often slow or down (504s/timeouts seen on real
+# runs); with the cache, re-checking known roads doesn't depend on it.
+# Only real OK/WARNING verdicts are cached, never errors.
+CACHE_PATH = Path(__file__).parent.parent / "road_cache.json"
+CACHE_MAX_AGE_DAYS = 90
+
+
+def _cache_key(lat: float, lon: float, radius_m: int) -> str:
+    return f"{lat:.4f},{lon:.4f},{radius_m}"
+
+
+def _load_cache() -> dict:
+    try:
+        data = json.loads(CACHE_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+    cutoff = time.time() - CACHE_MAX_AGE_DAYS * 86400
+    return {k: v for k, v in data.items() if v.get("at", 0) >= cutoff}
+
+
 def road_types(points: list[tuple[float, float]], radius_m: int = DEFAULT_RADIUS_M) -> list[str]:
-    """Classify many points with ONE Overpass request (sequential single-point
-    calls in parallel got rate-limited on a real run). Ways are assigned to
-    points by distance to their geometry."""
-    parts = "".join(f'way(around:{radius_m},{lat},{lon})["highway"];' for lat, lon in points)
+    """Classify many points: cached points from road_cache.json, the rest with
+    ONE Overpass request (parallel single-point calls got rate-limited on a
+    real run). Ways are assigned to points by distance to their geometry."""
+    cache = _load_cache()
+    keys = [_cache_key(lat, lon, radius_m) for lat, lon in points]
+    todo = [(i, p) for i, (p, k) in enumerate(zip(points, keys)) if k not in cache]
+    results = [cache[k]["verdict"] if k in cache else None for k in keys]
+    if not todo:
+        return results
+
+    parts = "".join(f'way(around:{radius_m},{lat},{lon})["highway"];' for _, (lat, lon) in todo)
     try:
         data = _post(f"[out:json][timeout:60];({parts});out tags geom;")
     except RuntimeError as e:
         # Explicit, unresolved check -- never silently treat the road as safe.
-        return [f"ERROR: could not reach any Overpass mirror ({e})"] * len(points)
+        for i, _ in todo:
+            results[i] = f"ERROR: could not reach any Overpass mirror ({e})"
+        return results
     ways = [el for el in data.get("elements", []) if "tags" in el and "geometry" in el]
-    return [
-        classify([w["tags"] for w in ways if _dist_to_way(lat, lon, w["geometry"]) <= radius_m], radius_m)
-        for lat, lon in points
-    ]
+    now = time.time()
+    for i, (lat, lon) in todo:
+        verdict = classify([w["tags"] for w in ways if _dist_to_way(lat, lon, w["geometry"]) <= radius_m], radius_m)
+        results[i] = verdict
+        cache[keys[i]] = {"verdict": verdict, "at": now}
+    try:
+        CACHE_PATH.write_text(json.dumps(cache))
+    except OSError:
+        pass  # a cache that can't be written just means the next check queries again
+    return results
 
 
 def road_type(lat: float, lon: float, radius_m: int = DEFAULT_RADIUS_M) -> str:

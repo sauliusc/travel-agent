@@ -23,11 +23,12 @@ def _km(a, b) -> float:
     return math.hypot((a.lon - b.lon) * kx, (a.lat - b.lat) * 110.54)
 
 
-def check(plan_b: PlanB, itinerary: Itinerary, max_driving_hours: float, route=None) -> tuple[list[str], dict[int, int]]:
-    """Problems found in a Plan B, and each needed day's driving minutes."""
+def check(plan_b: PlanB, itinerary: Itinerary, max_driving_hours: float, route=None) -> tuple[list[str], dict[int, int], list[str]]:
+    """(problems the agent must fix, each needed day's driving minutes, legs
+    that couldn't be checked because the road data service was unreachable)."""
     route = route or leg_check
     main = {d.number: d for d in itinerary.days}
-    problems, minutes = [], {}
+    problems, minutes, unchecked = [], {}, []
     for alt in plan_b.days:
         if not alt.needed:
             continue
@@ -49,15 +50,17 @@ def check(plan_b: PlanB, itinerary: Itinerary, max_driving_hours: float, route=N
             try:
                 leg = route(a.lat, a.lon, b.lat, b.lon)
             except Exception as e:  # noqa: BLE001 - an unreachable router is a failed check, not a crash
-                problems.append(f"Day {alt.day}: {a.name} -> {b.name} could not be checked ({e})")
+                unchecked.append(f"Day {alt.day}: {a.name} -> {b.name} ({e})")
                 continue
             total += leg["minutes"]
-            if not leg["ok"]:
-                problems.append(f"Day {alt.day}: {a.name} -> {b.name} is not confirmed paved/drivable:\n{leg['text']}")
+            if leg["status"] == "unknown":
+                unchecked.append(f"Day {alt.day}: {a.name} -> {b.name}")
+            elif not leg["ok"]:
+                problems.append(f"Day {alt.day}: {a.name} -> {b.name} is not paved/drivable:\n{leg['text']}")
         minutes[alt.day] = round(total)
         if total > max_driving_hours * 60:
             problems.append(f"Day {alt.day}: {total / 60:.1f} h of driving exceeds the {max_driving_hours} h daily limit")
-    return problems, minutes
+    return problems, minutes, unchecked
 
 
 def build(requirements_json: str, itinerary_json: str, forecast_json: str) -> PlanBChecked:
@@ -67,14 +70,21 @@ def build(requirements_json: str, itinerary_json: str, forecast_json: str) -> Pl
             f"Weather for the trip dates:\n{forecast_json}")
     tools = ["WebSearch", "WebFetch", "Bash"]
     plan_b = run_structured(SYSTEM_PROMPT, tools, task, PlanB, timeout=TIMEOUT)
-    problems, minutes = check(plan_b, itinerary, requirements.max_driving_hours_per_day)
+    problems, minutes, unchecked = check(plan_b, itinerary, requirements.max_driving_hours_per_day)
+    # Only real problems go back to the agent -- it can't fix an outage.
     if problems:
         retry = (f"{task}\n\nYour previous Plan B:\n{plan_b.model_dump_json()}\n\n"
                  "It has these problems -- fix them and return the complete Plan B:\n- " + "\n- ".join(problems))
         plan_b = run_structured(SYSTEM_PROMPT, tools, retry, PlanB, timeout=TIMEOUT)
-        problems, minutes = check(plan_b, itinerary, requirements.max_driving_hours_per_day)
+        problems, minutes, unchecked = check(plan_b, itinerary, requirements.max_driving_hours_per_day)
     if problems:
         raise ClaudeCLIError("Planas B neatitinka reikalavimų po pataisymo:\n- " + "\n- ".join(problems))
+    if unchecked:
+        raise ClaudeCLIError(
+            "Kelių duomenų tarnyba (Overpass) šiuo metu nepasiekiama, todėl nepavyko patikrinti šių "
+            "Plano B kelių:\n- " + "\n- ".join(unchecked)
+            + "\nTai ne kelio problema -- pakartok „↻ Planas B“ po kurio laiko."
+        )
 
     needed = [d for d in plan_b.days if d.needed]
     routes = {r["day"]: r["urls"] for r in day_routes(Itinerary.model_validate(
