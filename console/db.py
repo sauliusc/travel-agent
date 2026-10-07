@@ -1,5 +1,6 @@
 """Minimal SQLite storage for the console: trip records and their event logs."""
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS trip_agent_calls (
 _MIGRATIONS = [
     ("trips", "finished_at", "TEXT"),
     ("trip_events", "level", "TEXT NOT NULL DEFAULT 'info'"),
+    ("trip_agent_calls", "meta", "TEXT"),
 ]
 
 
@@ -170,7 +172,7 @@ def get_events(trip_id: str) -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def save_agent_call(trip_id: str, stage: str, query: str, response: str) -> None:
+def save_agent_call(trip_id: str, stage: str, query: str, response: str, meta: dict | None = None) -> None:
     """Append one real claude -p query+response for a trip's stage.
 
     Append-only by design (see trip_agent_calls' schema comment) -- a stage
@@ -179,8 +181,8 @@ def save_agent_call(trip_id: str, stage: str, query: str, response: str) -> None
     """
     with connect() as conn:
         conn.execute(
-            "INSERT INTO trip_agent_calls (trip_id, stage, query, response) VALUES (?, ?, ?, ?)",
-            (trip_id, stage, query, response),
+            "INSERT INTO trip_agent_calls (trip_id, stage, query, response, meta) VALUES (?, ?, ?, ?, ?)",
+            (trip_id, stage, query, response, json.dumps(meta, ensure_ascii=False) if meta else None),
         )
 
 
@@ -212,3 +214,33 @@ def get_call_stage_summary(trip_id: str) -> list[dict]:
             (trip_id,),
         ).fetchall()
     return [{"stage": row["stage"], "count": row["count"]} for row in rows]
+
+
+def get_agent_overview() -> list[dict]:
+    """Per agent stage, across all trips: call count, last call time and the
+    latest call's invocation meta (model, tools, prompt file...)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT stage, COUNT(*) AS count, MAX(id) AS last_id, MAX(created_at) AS last_at "
+            "FROM trip_agent_calls GROUP BY stage"
+        ).fetchall()
+        out = []
+        for r in rows:
+            last = conn.execute(
+                "SELECT meta FROM trip_agent_calls WHERE stage = ? AND meta IS NOT NULL ORDER BY id DESC LIMIT 1",
+                (r["stage"],),
+            ).fetchone()
+            out.append({"stage": r["stage"], "count": r["count"], "last_at": r["last_at"],
+                        "meta": json.loads(last["meta"]) if last else None})
+    return out
+
+
+def get_recent_agent_calls(stage: str, limit: int = 20) -> list[sqlite3.Row]:
+    """Latest calls of one agent stage across all trips, newest first."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT c.id, c.trip_id, c.created_at, c.query, c.response, c.meta, t.requirements_text "
+            "FROM trip_agent_calls c LEFT JOIN trips t ON t.id = c.trip_id "
+            "WHERE c.stage = ? ORDER BY c.id DESC LIMIT ?",
+            (stage, limit),
+        ).fetchall()
