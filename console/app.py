@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Body, FastAPI, Form, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sse_starlette.sse import EventSourceResponse
 
 from console import config, db
@@ -300,9 +300,15 @@ def _agent_description(module: str) -> str:
     return doc.strip().split("\n\n")[0].replace("\n", " ")
 
 
-@app.get("/agents", response_class=HTMLResponse)
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page():
+    return FileResponse(STATIC_DIR / "settings.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/agents")
 def agents_page():
-    return FileResponse(STATIC_DIR / "agents.html", headers={"Cache-Control": "no-cache"})
+    # Old address; the agents view now lives under settings.
+    return RedirectResponse("/settings#agents")
 
 
 @app.get("/api/agents")
