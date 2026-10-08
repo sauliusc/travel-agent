@@ -21,6 +21,25 @@
   #sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
   #sidebar-header h1 { font-size: 16px; margin: 0 0 12px; font-weight: 600; }
   #new-trip-btn { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  #manage-bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
+  #manage-bar .link-btn { padding: 0; }
+  #manage-tools { display: none; padding: 8px 16px; border-bottom: 1px solid var(--border); gap: 6px; flex-wrap: wrap; }
+  body.managing #manage-tools { display: flex; }
+  #manage-tools .btn { font-size: 12px; padding: 5px 10px; }
+  .trip-item { position: relative; }
+  .trip-select { display: none; position: absolute; top: 12px; left: 10px; width: 16px; height: 16px; accent-color: var(--err); pointer-events: none; }
+  body.managing .trip-select { display: block; }
+  body.managing .trip-item { padding-left: 36px; }
+  body.managing .trip-item.selected { border-color: var(--err); background: var(--err-bg); }
+  body.managing .trip-item[data-status=running], body.managing .trip-item[data-status=queued] { opacity: .5; cursor: not-allowed; }
+  .btn.danger-solid { background: #b84a44; border-color: #b84a44; color: #fff; }
+  .btn.danger-solid:disabled { opacity: .4; cursor: not-allowed; }
+  dialog#confirm { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 20px; max-width: 440px; width: calc(100% - 32px); }
+  dialog#confirm::backdrop { background: rgba(0,0,0,.6); }
+  dialog#confirm h3 { margin: 0 0 8px; font-size: 16px; }
+  dialog#confirm p { margin: 0 0 8px; font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  dialog#confirm ul { margin: 0 0 12px; padding-left: 18px; font-size: 13px; max-height: 160px; overflow-y: auto; }
+  dialog#confirm .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
   #agents-link { display: block; margin-top: 10px; font-size: 13px; color: var(--accent-2); text-decoration: none; }
   #agents-link:hover { text-decoration: underline; }
   #new-trip-btn:hover { background: var(--accent-2); }
@@ -151,6 +170,16 @@
       <button id="new-trip-btn" onclick="showComposer()">+ Nauja kelionė</button>
       <a id="agents-link" href="/agents">🤖 Agentai: modeliai ir užduotys →</a>
     </div>
+    <div id="manage-bar">
+      <span>Kelionės</span>
+      <button class="link-btn" id="manage-toggle" onclick="toggleManage()">Tvarkyti</button>
+    </div>
+    <div id="manage-tools">
+      <button class="btn" onclick="selectOlder(30)">Senesnės nei 30 d.</button>
+      <button class="btn" onclick="selectAll(true)">Visos</button>
+      <button class="btn" onclick="selectAll(false)">Nieko</button>
+      <button class="btn danger-solid" id="bulk-delete" disabled onclick="bulkDelete()">Ištrinti (0)</button>
+    </div>
     <div id="trip-list" hx-get="/trips/list" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
   </aside>
 
@@ -199,6 +228,16 @@
     </div>
   </main>
 
+<dialog id="confirm">
+  <h3 id="confirm-title"></h3>
+  <p id="confirm-text"></p>
+  <ul id="confirm-list"></ul>
+  <p>Bus ištrinta visa istorija: eiga, žingsnių rezultatai ir agentų užklausos. Šio veiksmo atšaukti negalima. GitHub puslapis ir repozitorija lieka.</p>
+  <div class="row">
+    <button class="btn" value="cancel" onclick="this.closest('dialog').close('cancel')">Atšaukti</button>
+    <button class="btn danger-solid" onclick="this.closest('dialog').close('ok')">Ištrinti</button>
+  </div>
+</dialog>
 <script>
 const STATUS_LABELS = { queued: 'Laukia', running: 'Vykdoma', done: 'Baigta', failed: 'Nepavyko' };
 const STAGE_LABELS = {
@@ -226,7 +265,7 @@ function markActiveInSidebar() {
 // since /trips/list is a stateless fragment that doesn't know which trip
 // the viewer currently has open.
 document.body.addEventListener('htmx:afterSwap', (e) => {
-  if (e.detail.target && e.detail.target.id === 'trip-list') markActiveInSidebar();
+  if (e.detail.target && e.detail.target.id === 'trip-list') { markActiveInSidebar(); syncSelection(); }
 });
 
 const isPhone = () => window.matchMedia('(max-width: 700px)').matches;
@@ -273,7 +312,7 @@ async function submitTrip() {
       body: 'requirements_text=' + encodeURIComponent(text),
     });
     const { trip_id } = await res.json();
-    htmx.trigger('#trip-list', 'load');
+    htmx.ajax('GET', '/trips/list', '#trip-list');
     openTrip(trip_id);
   } finally {
     btn.disabled = false;
@@ -537,7 +576,7 @@ function streamLive(tripId) {
     appendLogLine(e.data, isError ? 'error' : 'info');
     if (e.data === 'Baigta.' || isError) {
       fetch('/trips/' + tripId).then(r => r.json()).then(renderDetailHeader);
-      htmx.trigger('#trip-list', 'load');
+      htmx.ajax('GET', '/trips/list', '#trip-list');
     } else if (tripId === currentTripId) {
       // Each progress line means a stage just started or finished -- refresh
       // the collapsible stage list (call counts, newly appeared stages) so
@@ -552,14 +591,14 @@ async function retryTrip(tripId) {
   const res = await fetch('/trips/' + tripId + '/retry', { method: 'POST' });
   if (!res.ok) return;
   const { trip_id } = await res.json();
-  htmx.trigger('#trip-list', 'load');
+  htmx.ajax('GET', '/trips/list', '#trip-list');
   openTrip(trip_id);
 }
 
 async function rerunFromStage(tripId, stage) {
   const res = await fetch('/trips/' + tripId + '/rerun-from/' + encodeURIComponent(stage), { method: 'POST' });
   if (!res.ok) { appendLogLine('Nepavyko paleisti iš naujo: ' + (await res.text()), 'error'); return; }
-  htmx.trigger('#trip-list', 'load');
+  htmx.ajax('GET', '/trips/list', '#trip-list');
   openTrip(tripId);
 }
 
@@ -573,15 +612,102 @@ async function modifyTrip(tripId) {
     body: 'modification=' + encodeURIComponent(text),
   });
   if (!res.ok) { appendLogLine('Nepavyko pataisyti: ' + (await res.text()), 'error'); return; }
-  htmx.trigger('#trip-list', 'load');
+  htmx.ajax('GET', '/trips/list', '#trip-list');
   openTrip(tripId);
 }
 
+// Confirmation dialog: resolves true only on an explicit "Ištrinti".
+function confirmDelete(title, text, items) {
+  const dlg = document.getElementById('confirm');
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-text').textContent = text;
+  const list = document.getElementById('confirm-list');
+  list.innerHTML = '';
+  items.slice(0, 20).forEach(t => { const li = document.createElement('li'); li.textContent = t; list.appendChild(li); });
+  if (items.length > 20) { const li = document.createElement('li'); li.textContent = `... ir dar ${items.length - 20}`; list.appendChild(li); }
+  list.hidden = !items.length;
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.querySelector('.btn').focus();  // default focus on "Atšaukti"
+  return new Promise(res => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok'), { once: true }));
+}
+
+const tripTitle = id => (document.querySelector(`.trip-item[data-trip-id="${CSS.escape(id)}"] .title`) || {}).textContent || id;
+
 async function deleteTrip(tripId) {
-  if (!confirm('Ištrinti šią kelionę iš istorijos?')) return;
+  if (!await confirmDelete('Ištrinti kelionę?', 'Bus ištrinta ši kelionė:', [tripTitle(tripId)])) return;
   await fetch('/trips/' + tripId, { method: 'DELETE' });
-  htmx.trigger('#trip-list', 'load');
-  if (currentTripId === tripId) showComposer();
+  selected.delete(tripId);
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  if (currentTripId === tripId) closePane();
+}
+
+// --- bulk delete ("Tvarkyti" mode) ---
+// Selection lives here, not in the DOM: the list is re-rendered every 5 s.
+const selected = new Set();
+const deletable = el => !['running', 'queued'].includes(el.dataset.status);
+
+function toggleManage() {
+  const on = document.body.classList.toggle('managing');
+  document.getElementById('manage-toggle').textContent = on ? 'Baigti' : 'Tvarkyti';
+  if (!on) selected.clear();
+  syncSelection();
+}
+
+function tripClick(ev, tripId) {
+  if (!document.body.classList.contains('managing')) { openTrip(tripId); return; }
+  const el = ev.currentTarget;
+  if (!deletable(el)) return;
+  selected.has(tripId) ? selected.delete(tripId) : selected.add(tripId);
+  syncSelection();
+}
+
+function syncSelection() {
+  const present = new Set();
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    const id = el.dataset.tripId;
+    present.add(id);
+    if (!deletable(el)) selected.delete(id);
+    const on = selected.has(id);
+    el.classList.toggle('selected', on);
+    el.querySelector('.trip-select').checked = on;
+  });
+  [...selected].forEach(id => { if (!present.has(id)) selected.delete(id); });
+  const btn = document.getElementById('bulk-delete');
+  btn.textContent = `Ištrinti (${selected.size})`;
+  btn.disabled = !selected.size;
+}
+
+function selectAll(on) {
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    if (on && deletable(el)) selected.add(el.dataset.tripId);
+  });
+  if (!on) selected.clear();
+  syncSelection();
+}
+
+function selectOlder(days) {
+  const cutoff = Date.now() - days * 86400000;
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    const t = Date.parse((el.dataset.created || '').replace(' ', 'T') + 'Z');
+    if (deletable(el) && t && t < cutoff) selected.add(el.dataset.tripId);
+  });
+  syncSelection();
+}
+
+async function bulkDelete() {
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (!await confirmDelete(`Ištrinti ${ids.length} kelion${ids.length === 1 ? 'ę' : 'es'}?`,
+                           'Bus ištrintos šios kelionės:', ids.map(tripTitle))) return;
+  const res = await fetch('/trips/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+  const out = await res.json();
+  selected.clear();
+  if (out.deleted.includes(currentTripId)) closePane();
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  if (out.skipped.length) alert(`${out.skipped.length} vykdomos kelionės neištrintos.`);
 }
 // /agents links to a trip as /#<trip id>.
 if (location.hash.length > 1) openTrip(decodeURIComponent(location.hash.slice(1)));

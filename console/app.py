@@ -11,7 +11,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException
+from fastapi import BackgroundTasks, Body, FastAPI, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -175,6 +175,23 @@ def delete_trip(trip_id: str):
     return {"deleted": trip_id}
 
 
+@app.post("/trips/delete")
+def delete_trips(payload: dict = Body(...)):
+    """Delete several trips with all their history; running/queued trips are skipped."""
+    deleted, skipped = [], []
+    for trip_id in payload.get("ids", []):
+        trip = db.get_trip(trip_id)
+        if trip is None:
+            continue
+        if trip["status"] in ("running", "queued"):
+            skipped.append(trip_id)
+            continue
+        db.delete_trip(trip_id)
+        _queues.pop(trip_id, None)
+        deleted.append(trip_id)
+    return {"deleted": deleted, "skipped": skipped}
+
+
 @app.get("/trips/{trip_id}/events")
 async def trip_events(trip_id: str):
     queue = _queues.get(trip_id)
@@ -209,7 +226,9 @@ def _render_trip_item(trip: dict) -> str:
     created = html.escape((trip["created_at"] or "")[:16])
     trip_id = html.escape(trip["id"])
     return (
-        f'<div class="trip-item" data-trip-id="{trip_id}" onclick="openTrip(\'{trip_id}\')">'
+        f'<div class="trip-item" data-trip-id="{trip_id}" data-status="{html.escape(status)}" '
+        f'data-created="{created}" onclick="tripClick(event, \'{trip_id}\')">'
+        f'<input type="checkbox" class="trip-select" tabindex="-1" aria-label="Pažymėti">'
         f'<div class="title">{title}</div>'
         f'<div class="trip-row">'
         f'<span class="badge {status}">{label}</span>'
