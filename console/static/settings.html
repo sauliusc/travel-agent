@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agentai</title>
+<title>Nustatymai</title>
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --panel-2: #1e2229; --border: #2a2f3a;
@@ -15,7 +15,13 @@
   header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
   header h1 { margin: 0; font-size: 17px; }
   header a { color: var(--accent-2); text-decoration: none; font-size: 14px; }
-  main { max-width: 1200px; margin: 0 auto; padding: 16px 24px 40px; }
+  .layout { display: flex; max-width: 1400px; margin: 0 auto; }
+  nav#settings-nav { width: 220px; flex-shrink: 0; padding: 16px 12px; position: sticky; top: 53px; align-self: flex-start; }
+  nav#settings-nav a { display: block; padding: 8px 12px; border-radius: 8px; color: var(--text-dim); text-decoration: none; font-size: 14px; margin-bottom: 2px; }
+  nav#settings-nav a:hover { background: var(--panel); color: var(--text); }
+  nav#settings-nav a.active { background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+  main { flex: 1; min-width: 0; padding: 16px 24px 40px; }
+  main > h2.section-title { margin: 0 0 6px; font-size: 20px; }
   .intro { color: var(--text-dim); font-size: 13px; margin: 0 0 16px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
   .agent { text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; }
@@ -49,6 +55,9 @@
   .empty { color: var(--text-dim); font-size: 13px; }
   @media (max-width: 700px) {
     header, main { padding-left: 16px; padding-right: 16px; }
+    .layout { display: block; }
+    nav#settings-nav { width: auto; position: static; display: flex; gap: 6px; overflow-x: auto; padding: 10px 16px 0; }
+    nav#settings-nav a { white-space: nowrap; margin: 0; }
     dl { grid-template-columns: 1fr; }
     dt { margin-top: 6px; }
   }
@@ -57,13 +66,12 @@
 <body>
 <header>
   <a href="/">← Kelionės</a>
-  <h1>🤖 Agentai</h1>
+  <h1>⚙️ Nustatymai</h1>
 </header>
-<main>
-  <p class="intro">Kiekvienas agentas – atskiras <code>claude -p</code> kvietimas. Modelis ir nustatymai rodomi iš paskutinio tikro kvietimo; užduotis – tai, kas agentui buvo nusiųsta.</p>
-  <div class="grid" id="agents"></div>
-  <div id="detail"></div>
-</main>
+<div class="layout">
+  <nav id="settings-nav" aria-label="Nustatymų skyriai"></nav>
+  <main id="settings-content"></main>
+</div>
 <script>
 let agents = [];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -71,7 +79,31 @@ const fmt = iso => iso ? iso.replace('T', ' ').slice(0, 16) : '–';
 const modelText = m => (m && m.models && m.models.length) ? m.models.join(', ') : null;
 const chips = (list, cls = '') => (list && list.length) ? list.map(t => `<span class="chip ${cls}">${esc(t)}</span>`).join('') : '<span class="empty">–</span>';
 
-async function load() {
+// Settings sections. To add one: append {id, label, title, render(container, sub)}
+// -- the nav, URL hash (#<id>/<sub>) and back/forward all follow automatically.
+const SECTIONS = [
+  { id: 'agents', label: '🤖 Agentai', title: 'Agentai', render: renderAgents },
+];
+
+function route() {
+  const [id, sub] = decodeURIComponent(location.hash.slice(1)).split('/');
+  const section = SECTIONS.find(s => s.id === id) || SECTIONS[0];
+  document.querySelectorAll('#settings-nav a').forEach(a => a.classList.toggle('active', a.dataset.id === section.id));
+  document.title = section.title + ' · Nustatymai';
+  const main = document.getElementById('settings-content');
+  main.innerHTML = `<h2 class="section-title">${esc(section.title)}</h2>`;
+  const box = document.createElement('div');
+  main.appendChild(box);
+  section.render(box, sub);
+}
+
+document.getElementById('settings-nav').innerHTML =
+  SECTIONS.map(s => `<a href="#${s.id}" data-id="${s.id}">${esc(s.label)}</a>`).join('');
+window.addEventListener('hashchange', route);
+
+async function renderAgents(box, sub) {
+  box.innerHTML = `<p class="intro">Kiekvienas agentas – atskiras <code>claude -p</code> kvietimas. Modelis ir nustatymai rodomi iš paskutinio tikro kvietimo; užduotis – tai, kas agentui buvo nusiųsta.</p>
+    <div class="grid" id="agents"></div><div id="detail"></div>`;
   agents = await (await fetch('/api/agents')).json();
   document.getElementById('agents').innerHTML = agents.map(a => {
     const model = modelText(a.meta);
@@ -80,12 +112,12 @@ async function load() {
       <div class="model ${model ? '' : 'none'}">${model ? esc(model) : (a.count ? 'modelis nežinomas (seni įrašai)' : 'dar nekviestas')}</div>
     </button>`;
   }).join('');
-  const want = location.hash.slice(1);
-  if (want && agents.some(a => a.stage === want)) openAgent(want);
+  if (sub && agents.some(a => a.stage === sub)) showAgent(sub);
 }
 
-async function openAgent(stage) {
-  history.replaceState(null, '', '#' + stage);
+function openAgent(stage) { location.hash = 'agents/' + stage; }
+
+async function showAgent(stage) {
   document.querySelectorAll('.agent').forEach(b => b.classList.toggle('active', b.dataset.stage === stage));
   const a = agents.find(x => x.stage === stage);
   const m = a.meta;
@@ -130,7 +162,7 @@ async function openAgent(stage) {
   }).join('');
 }
 
-load();
+route();
 </script>
 </body>
 </html>
