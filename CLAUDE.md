@@ -52,3 +52,12 @@ pateikiamas kaip atskiras PR. `.github/workflows/auto-merge.yml` automatiškai s
 Kiekvienas `tools/*.py` modulis turėtų turėti paprastą smoke testą (tiesioginis HTTP
 kvietimas realiam API, ne mock) — šie API yra nemokami ir be rate limit problemų testavimo
 apimtimi.
+
+## Diegimas (CT110)
+
+Po kiekvieno sujungto PR naudotojui visada nurodyti šią atnaujinimo komandą (ne `git pull` +
+`systemctl restart` atskirai):
+
+```bash
+cd /opt/travel-agent && bash scripts/update.sh
+```
