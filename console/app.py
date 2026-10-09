@@ -23,6 +23,9 @@ app = FastAPI(title="Travel planning console")
 STATIC_DIR = Path(__file__).parent / "static"
 logger = logging.getLogger("travel-console")
 
+# trip_stages key (not a pipeline stage) holding where a failed run should resume.
+RESUME_KEY = "_resume"
+
 # In-memory per-trip event queues for SSE; trip_events table is the durable log.
 _queues: dict[str, asyncio.Queue] = {}
 
@@ -64,6 +67,24 @@ def _run_pipeline(
     `modification` (see /trips/{id}/modify).
     """
     queue = _queues[trip_id]
+    done_this_run: list[str] = []
+
+    def stage_complete(stage: str, output: str) -> None:
+        db.save_stage_output(trip_id, stage, output)
+        if stage in STAGE_ORDER:
+            done_this_run.append(stage)
+
+    def remember_resume_point() -> None:
+        # Where "↻ Bandyti dar kartą" continues: right after the last stage
+        # this run finished. A modification not yet applied to the itinerary
+        # is kept, so it's applied on retry instead of being lost.
+        last = max((STAGE_ORDER.index(s) for s in done_this_run), default=None)
+        resume = stage_name if last is None else STAGE_ORDER[min(last + 1, len(STAGE_ORDER) - 1)]
+        itinerary_done = "itinerary" in done_this_run
+        db.save_stage_output(trip_id, RESUME_KEY, json.dumps({
+            "stage": "accommodation" if modification and not itinerary_done else resume,
+            "modification": modification if modification and not itinerary_done else None,
+        }, ensure_ascii=False))
 
     def log(message: str, level: str = "info"):
         db.add_event(trip_id, message, level)
@@ -79,18 +100,21 @@ def _run_pipeline(
             stage_name,
             cached_outputs=cached_outputs,
             on_progress=log,
-            on_stage_complete=lambda stage, output: db.save_stage_output(trip_id, stage, output),
+            on_stage_complete=stage_complete,
             on_llm_call=lambda stage, query, response, meta=None: db.save_agent_call(trip_id, stage, query, response, meta),
             modification=modification,
             user_requirements=requirements_text,
         )
+        db.save_stage_output(trip_id, RESUME_KEY, "")
         db.set_status(trip_id, "done", page_url=url)
         log(f"Puslapis paskelbtas: {url}")
         log("Baigta.")
     except NotImplementedError as e:
+        remember_resume_point()
         db.set_status(trip_id, "failed")
         log(f"Klaida: {e}", level="error")
     except Exception as e:  # noqa: BLE001 - surface any failure to the console log
+        remember_resume_point()
         db.set_status(trip_id, "failed")
         log(f"Nepavyko: {e}", level="error")
     finally:
@@ -106,16 +130,40 @@ def create_trip(background_tasks: BackgroundTasks, requirements_text: str = Form
     return {"trip_id": trip_id}
 
 
+def _legacy_resume_point(trip_id: str, cached: dict) -> tuple[str, str | None]:
+    """Resume point for a run that failed before RESUME_KEY existed: a
+    modification whose run never finished is re-applied; otherwise the first
+    stage without output, else "forecast" (code-only -- later stages rerun
+    only if their inputs changed)."""
+    events = [e["message"] for e in db.get_events(trip_id)]
+    for msg in reversed(events):
+        if msg == "Baigta.":
+            break
+        if msg.startswith("Taikomas pataisymas: "):
+            return "accommodation", msg[len("Taikomas pataisymas: "):]
+    return next((s for s in STAGE_ORDER if s not in cached), "forecast"), None
+
+
 @app.post("/trips/{trip_id}/retry")
 def retry_trip(trip_id: str, background_tasks: BackgroundTasks):
-    original = db.get_trip(trip_id)
-    if original is None:
+    """Continue the same trip from where it failed, reusing finished stages
+    (and re-applying a modification that hadn't reached the itinerary yet).
+    Never creates a new trip."""
+    trip = db.get_trip(trip_id)
+    if trip is None:
         raise HTTPException(404, "Trip not found")
-    new_id = uuid.uuid4().hex[:12]
-    db.create_trip(new_id, original["requirements_text"])
-    _queues[new_id] = asyncio.Queue()
-    background_tasks.add_task(_run_pipeline, new_id, original["requirements_text"])
-    return {"trip_id": new_id}
+    if trip["status"] in ("running", "queued"):
+        raise HTTPException(409, "Trip is already running")
+    cached = db.get_stage_outputs(trip_id)
+    resume = json.loads(cached.get(RESUME_KEY) or "null") or {}
+    stage, modification = resume.get("stage"), resume.get("modification")
+    if stage not in STAGE_ORDER:
+        stage, modification = _legacy_resume_point(trip_id, cached)
+    db.set_status(trip_id, "queued")
+    _queues[trip_id] = asyncio.Queue()
+    background_tasks.add_task(_run_pipeline, trip_id, trip["requirements_text"], stage,
+                              cached, modification)
+    return {"trip_id": trip_id, "stage": stage}
 
 
 @app.post("/trips/{trip_id}/rerun-from/{stage}")
