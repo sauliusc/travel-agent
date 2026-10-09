@@ -37,7 +37,7 @@ def describe_code(code: int) -> str:
     return next((text for codes, text in _CODES if code in codes), "Permainingi orai")
 
 
-def _forecast(lat: float, lon: float, date: dt.date) -> dict:
+def _forecast(lat: float, lon: float, date: dt.date) -> dict | None:
     resp = httpx.get(FORECAST_URL, params={
         "latitude": lat, "longitude": lon, "timezone": "auto",
         "start_date": date.isoformat(), "end_date": date.isoformat(),
@@ -46,6 +46,8 @@ def _forecast(lat: float, lon: float, date: dt.date) -> dict:
     }, timeout=30)
     resp.raise_for_status()
     d = {k: v[0] for k, v in resp.json()["daily"].items()}
+    if d.get("weather_code") is None or d.get("temperature_2m_max") is None:
+        return None  # date at the edge of the forecast range: Open-Meteo returns nulls
     return {
         "source": "forecast", "summary": describe_code(int(d["weather_code"])),
         "temp_min_c": d["temperature_2m_min"], "temp_max_c": d["temperature_2m_max"],
@@ -81,7 +83,14 @@ def _climate(lat: float, lon: float, date: dt.date) -> dict:
 
 
 def day_weather(lat: float, lon: float, date: dt.date, today: dt.date) -> dict:
-    return _forecast(lat, lon, date) if (date - today).days <= HORIZON_DAYS else _climate(lat, lon, date)
+    # Forecast within the horizon; otherwise -- or when the forecast has no
+    # data for that day yet (seen at day 16: all-null daily values) -- the
+    # multi-year climate average.
+    if (date - today).days <= HORIZON_DAYS:
+        result = _forecast(lat, lon, date)
+        if result is not None:
+            return result
+    return _climate(lat, lon, date)
 
 
 def trip_forecast(itinerary: Itinerary, start_date: dt.date, today: dt.date | None = None) -> TripForecast:
