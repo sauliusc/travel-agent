@@ -168,7 +168,8 @@ def stay_details(url: str) -> dict:
         details = parse(_fetch_html(url), url)
         details["photos"] = [p.model_dump() for p in _download_photos(details)]
     except Exception as e:  # noqa: BLE001 - reported to the agent/page, never fatal
-        details = {"url": url, "error": str(e)}
+        # Not cached: a rerun of the step should try the page again.
+        return {"url": url, "error": str(e)}
     _cache[url] = details
     return details
 
