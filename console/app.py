@@ -57,6 +57,7 @@ def _run_pipeline(
     stage_name: str = "requirements",
     cached_outputs: dict[str, str] | None = None,
     modification: str | None = None,
+    change_notes: list[str] | None = None,
 ):
     """Run (or resume, or modify) a trip's pipeline in the background.
 
@@ -81,9 +82,12 @@ def _run_pipeline(
         last = max((STAGE_ORDER.index(s) for s in done_this_run), default=None)
         resume = stage_name if last is None else STAGE_ORDER[min(last + 1, len(STAGE_ORDER) - 1)]
         itinerary_done = "itinerary" in done_this_run
+        request = modification or (change_notes[0] if change_notes else None)
         db.save_stage_output(trip_id, RESUME_KEY, json.dumps({
             "stage": "accommodation" if modification and not itinerary_done else resume,
             "modification": modification if modification and not itinerary_done else None,
+            # Already in the itinerary, but the page still has to show it.
+            "note": request if request and (itinerary_done or not modification) else None,
         }, ensure_ascii=False))
 
     def log(message: str, level: str = "info"):
@@ -104,6 +108,7 @@ def _run_pipeline(
             on_llm_call=lambda stage, query, response, meta=None: db.save_agent_call(trip_id, stage, query, response, meta),
             modification=modification,
             user_requirements=requirements_text,
+            change_notes=change_notes,
         )
         db.save_stage_output(trip_id, RESUME_KEY, "")
         db.set_status(trip_id, "done", page_url=url)
@@ -161,8 +166,9 @@ def retry_trip(trip_id: str, background_tasks: BackgroundTasks):
         stage, modification = _legacy_resume_point(trip_id, cached)
     db.set_status(trip_id, "queued")
     _queues[trip_id] = asyncio.Queue()
+    note = resume.get("note")
     background_tasks.add_task(_run_pipeline, trip_id, trip["requirements_text"], stage,
-                              cached, modification)
+                              cached, modification, [note] if note else None)
     return {"trip_id": trip_id, "stage": stage}
 
 
