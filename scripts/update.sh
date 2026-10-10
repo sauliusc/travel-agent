@@ -51,6 +51,14 @@ else
   fi
 fi
 
+# Headless Chromium for tools/booking.py (booking.com answers plain requests
+# with a bot check). Idempotent: skipped once the browser is present.
+if ! ls /root/.cache/ms-playwright/chromium* >/dev/null 2>&1; then
+  log "Installing headless Chromium (Playwright) for booking.com pages"
+  .venv/bin/pip install -q -r requirements.txt
+  .venv/bin/python -m playwright install --with-deps chromium
+fi
+
 log "Restarting travel-console"
 systemctl restart travel-console
 systemctl --no-pager --lines=0 status travel-console || true

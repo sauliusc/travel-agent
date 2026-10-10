@@ -67,6 +67,7 @@ if [ ! -d ".venv" ]; then
 fi
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements.txt
+.venv/bin/python -m playwright install --with-deps chromium >/dev/null
 
 log "Installing Claude Code CLI"
 if ! command -v claude >/dev/null 2>&1; then
