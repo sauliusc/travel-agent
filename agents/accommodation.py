@@ -29,7 +29,10 @@ UPDATE_RULES = """You are updating an existing accommodation plan with a change 
 traveller. If the request concerns where they stay (adding, replacing or removing a hotel,
 a night, a city), apply it: for hotels they name, look up the real address, typical price
 for the dates, parking and contacts, and keep everything else in the plan as it is. If the
-request doesn't concern accommodation at all, return changed=false and the plan unchanged."""
+request doesn't concern accommodation at all, return changed=false and the plan unchanged.
+A place to stay the traveller names or links now replaces the one in the original trip request
+(the request text is older). If a booking link can't be opened, identify the property from the
+link's name/slug and search for it; never keep the old place just because the page didn't load."""
 
 
 def update(current: str, modification: str, requirements_json: str) -> AccommodationUpdate:

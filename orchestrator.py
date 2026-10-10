@@ -131,7 +131,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "plan_b": ["requirements", "itinerary"],
     "packing": ["requirements", "itinerary", "forecast", "car_rental"],
     "budget": ["itinerary", "accommodation", "car_rental", "food"],
-    "page": ["requirements", "itinerary", "logistics_report", "budget", "map_data", "images",
+    "page": ["requirements", "accommodation", "itinerary", "logistics_report", "budget", "map_data", "images",
              "car_rental", "food", "forecast", "plan_b", "packing"],
     "deploy_log": ["page", "images", "food"],
 }
@@ -176,6 +176,7 @@ def run_from_stage(
     on_llm_call=None,
     modification: str | None = None,
     user_requirements: str | None = None,
+    change_notes: list[str] | None = None,
 ) -> str:
     """Run the pipeline from `stage_name` to CI/CD deploy and return the
     published page's URL.
@@ -238,7 +239,9 @@ def run_from_stage(
         return True
 
     # What changed in this run, for the Page Designer's update mode.
-    changes: list[str] = []
+    # Notes for the in-place page update; change_notes carries a traveller's
+    # request from an earlier, interrupted run so a resumed run still applies it.
+    changes: list[str] = [f"Traveller's change request: {n}" for n in change_notes or []]
     changed_stages: list[str] = []
 
     def save(stage: str, value: str) -> None:
@@ -290,7 +293,12 @@ def run_from_stage(
         if modification is not None and "itinerary" in out:
             progress("Dienų plano koregavimas pagal nurodymą...")
             with log_calls("itinerary", on_llm_call):
-                new_itinerary, summary = fix(out["itinerary"], f"{modification}\n\nCurrent accommodation:\n{accommodation}")
+                new_itinerary, summary = fix(out["itinerary"], (
+                    f"{modification}\n\nCurrent accommodation (updated -- it replaces any place to stay "
+                    f"named in the original request; every stop at the old lodging, e.g. check-in, "
+                    f"overnight, morning start, must move to the new one with its coordinates):\n{accommodation}"))
+            if new_itinerary == out["itinerary"]:
+                progress("Dienų planas pagal pataisymą nepasikeitė.")
             save("itinerary", new_itinerary)
             changes += [f"Traveller's change request: {modification}", f"Itinerary: {summary}"]
         else:
@@ -432,6 +440,9 @@ def run_from_stage(
     def page_context() -> dict:
         return {
             "language": requirements.language,
+            # Current accommodation plan: after a traveller's change it
+            # overrides any hotel named in the original request.
+            "accommodation": accommodation,
             "itinerary": out["itinerary"],
             "day_routes": day_routes(Itinerary.model_validate_json(out["itinerary"])),
             "logistics": _page_logistics(logistics_report),
