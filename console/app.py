@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sse_starlette.sse import EventSourceResponse
 
 from console import config, db
-from orchestrator import STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
+from orchestrator import CODE_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
 
 app = FastAPI(title="Travel planning console")
 
@@ -184,7 +184,7 @@ def rerun_trip_from_stage(trip_id: str, stage: str, background_tasks: Background
     if stage not in STAGE_ORDER:
         raise HTTPException(400, f"Unknown stage {stage!r}, must be one of {STAGE_ORDER}")
     cached = db.get_stage_outputs(trip_id)
-    missing = [s for s in STAGE_ORDER[: STAGE_ORDER.index(stage)] if s not in cached]
+    missing = [s for s in STAGE_ORDER[: STAGE_ORDER.index(stage)] if s not in cached and s not in CODE_STAGES]
     if missing:
         raise HTTPException(400, f"Missing cached output for earlier stage(s): {missing}")
     # Set status before returning (not just inside the background task) so a

@@ -21,6 +21,12 @@ Everything you receive has already been checked (routes validated, images verifi
 ## Content
 - Mobile-first responsive layout; a distinct accent color for this trip.
 - Short intro: where, when, who, route overview.
+- Accommodation section ("🏠 Nakvynė") from `accommodation`. If `stay` has a `name` (the
+  booked property, read from its booking.com page), show it prominently: name, address,
+  rating (e.g. "9,1/10 · 245 atsiliepimai"), a short description in the trip's language,
+  a "Booking.com" link (`stay.url`) and a small photo gallery of `stay.photos` (by exact
+  `local_path`, `.spot-thumb` lightbox) with the credit "Nuotraukos: Booking.com". The
+  booked property replaces any other place to stay named elsewhere.
 - Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
   from `logistics.legs`), stop notes.
 - At the top of each day, a prominent button that opens the whole day's driving route in
