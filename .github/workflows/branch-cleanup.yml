@@ -1,0 +1,38 @@
+name: Clean up finished branches
+
+# Deletes claude/* branches that are done: every PR from them is closed
+# (merged or abandoned) and none is open, or they have nothing main lacks.
+# Runs after every push to main, and on demand.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const branches = await github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 });
+            const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', per_page: 100 });
+            for (const { name } of branches) {
+              if (!name.startsWith('claude/')) continue;
+              const mine = prs.filter(p => p.head.ref === name && p.head.repo && p.head.repo.full_name === `${owner}/${repo}`);
+              if (mine.some(p => p.state === 'open')) continue;
+              let done = mine.length > 0;
+              if (!done) {
+                const cmp = await github.rest.repos.compareCommits({ owner, repo, base: 'main', head: name });
+                done = cmp.data.ahead_by === 0;
+              }
+              if (!done) { core.info(`keep ${name} (unmerged work, no PR)`); continue; }
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/${name}` });
+              core.info(`deleted ${name}`);
+            }
