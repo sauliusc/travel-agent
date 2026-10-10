@@ -70,7 +70,11 @@ def _fetch_html(url: str) -> str:
         try:
             page = browser.new_page(user_agent=HEADERS["User-Agent"], locale="en-GB")
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(3000)
+            # The bot check runs JS and then reloads into the real page.
+            try:
+                page.wait_for_selector('script[type="application/ld+json"]', state="attached", timeout=25000)
+            except Exception:  # noqa: BLE001 - judged below by the content
+                pass
             text = page.content()
         finally:
             browser.close()
