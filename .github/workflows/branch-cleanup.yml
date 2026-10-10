@@ -2,7 +2,8 @@ name: Clean up finished branches
 
 # Deletes claude/* branches that are done: every PR from them is closed
 # (merged or abandoned) and none is open, or they have nothing main lacks.
-# Runs after every push to main, and on demand.
+# Runs on manual pushes to main and on demand; auto-merge.yml runs the
+# same sweep after each merge (GITHUB_TOKEN merges don't trigger this).
 on:
   push:
     branches: [main]

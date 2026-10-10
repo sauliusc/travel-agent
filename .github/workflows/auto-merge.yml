@@ -29,3 +29,24 @@ jobs:
               repo: context.repo.repo,
               ref: `heads/${context.payload.pull_request.head.ref}`,
             });
+            // Sweep other finished claude/* branches too. A merge done with
+            // GITHUB_TOKEN doesn't trigger push workflows, so branch-cleanup.yml
+            // never runs after an auto-merge -- the sweep has to live here.
+            {
+              const { owner, repo } = context.repo;
+              const branches = await github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 });
+              const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', per_page: 100 });
+              for (const { name } of branches) {
+                if (!name.startsWith('claude/')) continue;
+                const mine = prs.filter(p => p.head.ref === name && p.head.repo && p.head.repo.full_name === `${owner}/${repo}`);
+                if (mine.some(p => p.state === 'open')) continue;
+                let done = mine.length > 0;
+                if (!done) {
+                  const cmp = await github.rest.repos.compareCommits({ owner, repo, base: 'main', head: name });
+                  done = cmp.data.ahead_by === 0;
+                }
+                if (!done) { core.info(`keep ${name} (unmerged work, no PR)`); continue; }
+                await github.rest.git.deleteRef({ owner, repo, ref: `heads/${name}` });
+                core.info(`deleted ${name}`);
+              }
+            }
