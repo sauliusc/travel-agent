@@ -37,7 +37,7 @@ jobs:
               const branches = await github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 });
               const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', per_page: 100 });
               for (const { name } of branches) {
-                if (!name.startsWith('claude/')) continue;
+                if (!name.startsWith('claude/') || name === context.payload.repository.default_branch) continue;
                 const mine = prs.filter(p => p.head.ref === name && p.head.repo && p.head.repo.full_name === `${owner}/${repo}`);
                 if (mine.some(p => p.state === 'open')) continue;
                 let done = mine.length > 0;
