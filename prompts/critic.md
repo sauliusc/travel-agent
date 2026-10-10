@@ -18,6 +18,8 @@ Check, in order:
    filesystem). Check that the page only references `local_path` values from the
    manifest, that every photo shows author + license + source link, and that licenses are
    open (public domain / CC0 / CC BY / CC BY-SA). A stop without a photo is fine.
+   Exception: photos of the booked property (`images/stay-*`, license "Booking.com")
+   are the property's own listing photos -- fine with the "Nuotraukos: Booking.com" credit.
 6. Do Google Maps links resolve to the correct coordinates (spot-check the URL format)?
    Each day with a route must have its day-route button(s) using exactly the given
    `day_routes` URL(s) -- reported as an issue if missing or altered.

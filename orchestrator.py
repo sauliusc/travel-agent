@@ -40,7 +40,7 @@ from schemas.food import FoodGuide
 from schemas.forecast import TripForecast
 from schemas.packing import PackingList
 from schemas.plan_b import PlanBChecked
-from schemas.images import ImageResults
+from schemas.images import FoundImage, ImageResults
 from schemas.logistics import LogisticsReport
 from schemas.requirements import TripRequirements
 from schemas.itinerary import Itinerary
@@ -50,6 +50,7 @@ from tools.maps_links import day_routes
 from tools.packing_html import inject as inject_packing
 from tools.packing_html import to_template as _packing_template
 from tools.map_html import inject as inject_map, map_data
+from tools.booking import find_urls as find_booking_urls, stay_details
 from tools.map_html import to_template as _map_template
 
 REPO_PREFIX = "ai-trip-"
@@ -65,6 +66,16 @@ def to_template(page_html: str) -> str | None:
     """Page with code-rendered blocks (packing list, map) back as placeholders."""
     t = _packing_template(page_html)
     return None if t is None else _map_template(t)
+
+
+def _booking_context(*texts: str | None) -> str | None:
+    """Details of booking.com links in the texts, read by code for the agent
+    (its own WebFetch can't open booking.com)."""
+    urls = find_booking_urls(*texts)
+    if not urls:
+        return None
+    return json.dumps([{k: v for k, v in stay_details(u).items() if k != "photos"} for u in urls],
+                      ensure_ascii=False)
 
 class LogisticsBlocked(RuntimeError):
     """The itinerary still has logistics blockers after MAX_LOGISTICS_FIXES reworks."""
@@ -89,6 +100,7 @@ STAGE_ORDER = [
     "research",
     "weather",
     "accommodation",
+    "stay",
     "itinerary",
     "logistics_report",
     "map_data",
@@ -119,6 +131,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "research": ["requirements"],
     "weather": ["requirements"],
     "accommodation": ["requirements", "research"],
+    "stay": ["accommodation"],
     "itinerary": ["requirements", "research", "weather", "accommodation"],
     "logistics_report": ["itinerary"],
     "map_data": ["itinerary"],
@@ -131,7 +144,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "plan_b": ["requirements", "itinerary"],
     "packing": ["requirements", "itinerary", "forecast", "car_rental"],
     "budget": ["itinerary", "accommodation", "car_rental", "food"],
-    "page": ["requirements", "accommodation", "itinerary", "logistics_report", "budget", "map_data", "images",
+    "page": ["requirements", "accommodation", "stay", "itinerary", "logistics_report", "budget", "map_data", "images",
              "car_rental", "food", "forecast", "plan_b", "packing"],
     "deploy_log": ["page", "images", "food"],
 }
@@ -146,10 +159,14 @@ STAGE_PROMPTS: dict[str, list[str]] = {
     "budget": ["budget.md"], "page": ["page_designer.md", "critic.md"],
 }
 
+# Stages computed by code from earlier outputs (no agent call): a trip saved
+# before such a stage existed can still be rerun from a later stage.
+CODE_STAGES = {"stay", "map_data", "forecast"}
+
 STAGE_LABELS = {
     "requirements": "Reikalavimai", "research": "Tyrimas", "weather": "Oras/sezonas",
     "accommodation": "Nakvynė", "itinerary": "Dienų planas", "logistics_report": "Logistika",
-    "map_data": "Žemėlapis", "images": "Nuotraukos", "car_rental": "Auto nuoma",
+    "stay": "Apgyvendinimo detalės", "map_data": "Žemėlapis", "images": "Nuotraukos", "car_rental": "Auto nuoma",
     "food": "Maistas ir barai", "forecast": "Orų prognozė", "plan_b": "Planas B",
     "packing": "Daiktai",
     "budget": "Biudžetas", "page": "Puslapis", "deploy_log": "Publikavimas",
@@ -228,6 +245,8 @@ def run_from_stage(
 
     def must_run(stage: str) -> bool:
         if STAGE_ORDER.index(stage) < start_idx:
+            if stage not in out and stage in CODE_STAGES:
+                return True  # cheap code stage added after this trip was made: just compute it
             if stage not in out:
                 raise ValueError(f"No stored result for stage {stage!r} -- run from an earlier stage")
             return False
@@ -278,15 +297,36 @@ def run_from_stage(
         if modification is not None and "accommodation" in out:
             progress("Nakvynė: taikomas pataisymas...")
             with log_calls("accommodation", on_llm_call):
-                update = update_accommodation(out["accommodation"], modification, requirements_json)
+                update = update_accommodation(out["accommodation"], modification, requirements_json,
+                                              _booking_context(modification))
             if not update.changed:
                 progress("Nakvynė: pataisymas nakvynės neliečia -- paliekama kaip buvo.")
             save("accommodation", update.accommodation if update.changed else out["accommodation"])
         else:
             progress("Nakvynės paieška...")
             with log_calls("accommodation", on_llm_call):
-                save("accommodation", run_accommodation(f"requirements={requirements_json}\nresearch={out['research']}"))
+                booked = _booking_context(user_requirements)
+                save("accommodation", run_accommodation(
+                    f"requirements={requirements_json}\nresearch={out['research']}"
+                    + (f"\nbooked_property (read from the traveller's booking.com link; keep this place "
+                       f"and its link)={booked}" if booked else "")))
     accommodation = out["accommodation"]
+
+    # Booked property from a booking.com link (code, no agent): details and a
+    # few photos for the page. The link is taken from the accommodation plan
+    # (which carries a traveller's changed booking), else the original request.
+    if must_run("stay"):
+        urls = find_booking_urls(accommodation) or find_booking_urls(user_requirements or "")
+        if urls:
+            progress("Apgyvendinimo detalės ir nuotraukos iš Booking.com...")
+            details = stay_details(urls[0])
+            if details.get("error"):
+                progress(f"Booking.com puslapio nuskaityti nepavyko ({details['error'][:120]}) -- "
+                         "naudojamas nakvynės aprašymas.")
+        else:
+            details = {}
+        save("stay", json.dumps(details, ensure_ascii=False))
+    stay = json.loads(out.get("stay") or "{}")
 
     # --- itinerary + logistics gate ----------------------------------------
     if must_run("itinerary"):
@@ -424,7 +464,8 @@ def run_from_stage(
 
     # Stop photos and dish photos are shipped together.
     all_images = ImageResults(
-        images=[*images.images, *(d.image for d in food.dishes if d.image)],
+        images=[*images.images, *(d.image for d in food.dishes if d.image),
+                *(FoundImage(**p) for p in stay.get("photos", []))],
         skipped=images.skipped,
     )
 
@@ -443,6 +484,9 @@ def run_from_stage(
             # Current accommodation plan: after a traveller's change it
             # overrides any hotel named in the original request.
             "accommodation": accommodation,
+            # Booked property: name, address, description, rating and photos
+            # (local_path) read from its booking.com page; {} if none.
+            "stay": stay,
             "itinerary": out["itinerary"],
             "day_routes": day_routes(Itinerary.model_validate_json(out["itinerary"])),
             "logistics": _page_logistics(logistics_report),

@@ -32,14 +32,17 @@ for the dates, parking and contacts, and keep everything else in the plan as it 
 request doesn't concern accommodation at all, return changed=false and the plan unchanged.
 A place to stay the traveller names or links now replaces the one in the original trip request
 (the request text is older). If a booking link can't be opened, identify the property from the
-link's name/slug and search for it; never keep the old place just because the page didn't load."""
+link's name/slug and search for it; never keep the old place just because the page didn't load.
+Always keep the traveller's booking.com link verbatim in the plan."""
 
 
-def update(current: str, modification: str, requirements_json: str) -> AccommodationUpdate:
+def update(current: str, modification: str, requirements_json: str, booking_details: str | None = None) -> AccommodationUpdate:
     """Apply a traveller's free-text change to the existing accommodation plan."""
     return run_structured(
         f"{SYSTEM_PROMPT}\n\n{UPDATE_RULES}", ["WebSearch", "WebFetch"],
         f"Trip requirements:\n{requirements_json}\n\nCurrent accommodation plan:\n{current}\n\n"
-        f"Change request:\n{modification}",
+        f"Change request:\n{modification}"
+        + (f"\n\nBooking.com page(s) from the request, already read for you (don't fetch them):\n{booking_details}"
+           if booking_details else ""),
         AccommodationUpdate, timeout=900,
     )
