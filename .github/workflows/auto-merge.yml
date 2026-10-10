@@ -23,3 +23,9 @@ jobs:
               pull_number: context.payload.pull_request.number,
               merge_method: 'squash'
             });
+            // Merged -- the branch has no further use.
+            await github.rest.git.deleteRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `heads/${context.payload.pull_request.head.ref}`,
+            });

@@ -47,6 +47,11 @@ Kiekvienas komponentas (žr. GitHub Issues) implementuojamas atskiroje `claude/*
 pateikiamas kaip atskiras PR. `.github/workflows/auto-merge.yml` automatiškai sujungia
 `claude/*` šakų PR į `main` (squash).
 
+- PR, kuris įgyvendina issue, aprašyme turi `Closes #N` — sujungus issue užsidaro automatiškai.
+  Jei issue įgyvendintas kitaip (be tokio PR), uždaryti jį ranka su komentaru.
+- Sujungus PR šaka ištrinama automatiškai (`auto-merge.yml`), o `branch-cleanup.yml` po kiekvieno
+  push į `main` ištrina likusias baigtas `claude/*` šakas. Rankiniu būdu šakų netrinti.
+
 ## Testavimas
 
 Kiekvienas `tools/*.py` modulis turėtų turėti paprastą smoke testą (tiesioginis HTTP
