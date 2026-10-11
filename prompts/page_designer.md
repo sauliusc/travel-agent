@@ -25,7 +25,11 @@ Everything you receive has already been checked (routes validated, images verifi
   booked property, read from its booking.com page), show it prominently: name, address,
   rating (e.g. "9,1/10 · 245 atsiliepimai"), a short description in the trip's language,
   a "Booking.com" link (`stay.url`) and a small photo gallery of `stay.photos` (by exact
-  `local_path`, `.spot-thumb` lightbox) with the credit "Nuotraukos: Booking.com". The
+  `local_path`, `.spot-thumb` lightbox) with the credit "Nuotraukos: Booking.com". If
+  `stay.full_description` is given, put it under the property in a collapsed
+  `<details>` (closed by default, summary "Apartamentų aprašymas"), one paragraph per item,
+  translated to the trip's language without shortening; `stay.facilities` as a short list
+  of chips in the same section. The
   booked property replaces any other place to stay named elsewhere.
 - Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
   from `logistics.legs`), stop notes.
