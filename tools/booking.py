@@ -14,6 +14,7 @@ import argparse
 import html as htmllib
 import json
 import re
+from html.parser import HTMLParser
 import sys
 from pathlib import Path
 
@@ -103,6 +104,61 @@ def _lodging_ld(page: str) -> dict:
     return {}
 
 
+class _ElementText(HTMLParser):
+    """Text of the first element matching one of `selectors` ((attr, value)
+    pairs), split into paragraphs / list items."""
+
+    _BLOCK = {"p", "li", "br", "div", "h2", "h3", "h4"}
+    _VOID = {"br", "img", "input", "meta", "link", "hr", "source", "wbr"}
+
+    def __init__(self, selectors: list[tuple[str, str]]):
+        super().__init__(convert_charrefs=True)
+        self.selectors, self.depth, self.done = selectors, 0, False
+        self.parts: list[str] = [""]
+
+    def handle_starttag(self, tag, attrs):
+        if self.done:
+            return
+        if self.depth == 0:
+            if any((a, v) in self.selectors for a, v in attrs):
+                self.depth = 1
+            return
+        if tag in self._BLOCK:
+            self.parts.append("")
+        if tag not in self._VOID:
+            self.depth += 1
+
+    def handle_endtag(self, tag):
+        if self.depth and not self.done and tag not in self._VOID:
+            self.depth -= 1
+            if tag in self._BLOCK:
+                self.parts.append("")
+            if self.depth == 0:
+                self.done = True
+
+    def handle_data(self, data):
+        if self.depth and not self.done:
+            self.parts[-1] += data
+
+    def blocks(self) -> list[str]:
+        return [t for t in (re.sub(r"\s+", " ", p).strip() for p in self.parts) if t]
+
+
+def _element_blocks(page: str, selectors: list[tuple[str, str]]) -> list[str]:
+    parser = _ElementText(selectors)
+    try:
+        parser.feed(page)
+    except Exception:  # noqa: BLE001 - malformed markup: whatever was collected
+        pass
+    return parser.blocks()
+
+
+# The property's own full description and its most popular facilities, as
+# booking.com marks them (JSON-LD carries only a one-line summary).
+_DESCRIPTION = [("data-testid", "property-description"), ("id", "property_description_content")]
+_FACILITIES = [("data-testid", "property-most-popular-facilities-wrapper")]
+
+
 def parse(page: str, url: str) -> dict:
     """Property details from a booking.com page (no network)."""
     ld = _lodging_ld(page)
@@ -128,6 +184,9 @@ def parse(page: str, url: str) -> dict:
         "name": ld.get("name") or _meta(page, "og:title"),
         "address": address or None,
         "description": htmllib.unescape(ld.get("description") or _meta(page, "og:description") or "").strip() or None,
+        # Full description from the property's booking.com page, paragraph by paragraph.
+        "full_description": [b for b in _element_blocks(page, _DESCRIPTION) if len(b) > 1] or None,
+        "facilities": list(dict.fromkeys(_element_blocks(page, _FACILITIES)))[:15] or None,
         "rating": rating.get("ratingValue"),
         "rating_scale": rating.get("bestRating", 10) if rating else None,
         "review_count": rating.get("reviewCount"),
