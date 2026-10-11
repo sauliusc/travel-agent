@@ -2,6 +2,9 @@
 
 Šis projektas implementuoja agentinę kelionių planavimo sistemą, aprašytą
 [dizaino dokumente](https://claude.ai/code/artifact/147e64cc-db43-43dd-a08c-263438c75677).
+Dabartinė architektūra, kiekvieno agento kontekstas ir siunčiama užklausa —
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Keičiant agento įvestį, užklausą ar įrankius,
+atnaujinti ir šį dokumentą.
 
 ## Kontekstas
 
