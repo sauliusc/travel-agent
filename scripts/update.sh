@@ -52,10 +52,11 @@ else
 fi
 
 # Headless Chromium for tools/booking.py (booking.com answers plain requests
-# with a bot check). Idempotent: skipped once the browser is present.
-if ! ls /root/.cache/ms-playwright/chromium* >/dev/null 2>&1; then
+# with a bot check). Checked by actually launching it -- a directory check
+# missed a missing headless shell after a Playwright upgrade.
+.venv/bin/pip install -q -r requirements.txt
+if ! .venv/bin/python -c "from playwright.sync_api import sync_playwright as s; p = s().start(); p.chromium.launch().close(); p.stop()" >/dev/null 2>&1; then
   log "Installing headless Chromium (Playwright) for booking.com pages"
-  .venv/bin/pip install -q -r requirements.txt
   .venv/bin/python -m playwright install --with-deps chromium
 fi
 
