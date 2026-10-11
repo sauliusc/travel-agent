@@ -21,16 +21,16 @@ Everything you receive has already been checked (routes validated, images verifi
 ## Content
 - Mobile-first responsive layout; a distinct accent color for this trip.
 - Short intro: where, when, who, route overview.
-- Accommodation section ("🏠 Nakvynė") from `accommodation`. If `stay` has a `name` (the
-  booked property, read from its booking.com page), show it prominently: name, address,
-  rating (e.g. "9,1/10 · 245 atsiliepimai"), a short description in the trip's language,
-  a "Booking.com" link (`stay.url`) and a small photo gallery of `stay.photos` (by exact
-  `local_path`, `.spot-thumb` lightbox) with the credit "Nuotraukos: Booking.com". If
-  `stay.full_description` is given, put it under the property in a collapsed
-  `<details>` (closed by default, summary "Apartamentų aprašymas"), one paragraph per item,
-  translated to the trip's language without shortening; `stay.facilities` as a short list
-  of chips in the same section. The
-  booked property replaces any other place to stay named elsewhere.
+- Accommodation section ("🏠 Nakvynė") from `accommodation`. `stays` holds details read
+  from each booking.com link in it (match a stay to its place by `url`). For every stay with
+  a `name`, its card shows: name, address, rating (e.g. "9,1/10 · 245 atsiliepimai"), a
+  short description in the trip's language, a "Booking.com" link (`url`) and a small photo
+  gallery of its `photos` (by exact `local_path`, `.spot-thumb` lightbox) with the credit
+  "Nuotraukos: Booking.com". If it has `full_description`, put it in the card in a
+  collapsed `<details>` (closed by default, summary "Apartamentų aprašymas"), one paragraph
+  per item, translated to the trip's language without shortening; `facilities` as a short
+  list of chips. A stay with an `error` keeps its card from `accommodation` (no photos).
+  A place the traveller booked replaces any other place to stay named elsewhere.
 - Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
   from `logistics.legs`), stop notes.
 - At the top of each day, a prominent button that opens the whole day's driving route in

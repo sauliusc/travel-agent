@@ -161,6 +161,8 @@ STAGE_PROMPTS: dict[str, list[str]] = {
 
 # Stages computed by code from earlier outputs (no agent call): a trip saved
 # before such a stage existed can still be rerun from a later stage.
+MAX_STAYS = 8  # booking.com pages read per trip (each is a browser load)
+
 CODE_STAGES = {"stay", "map_data", "forecast"}
 
 STAGE_LABELS = {
@@ -313,20 +315,22 @@ def run_from_stage(
     accommodation = out["accommodation"]
 
     # Booked property from a booking.com link (code, no agent): details and a
-    # few photos for the page. The link is taken from the accommodation plan
-    # (which carries a traveller's changed booking), else the original request.
+    # few photos for the page -- for every booking.com link in the
+    # accommodation plan (one per night/city), else in the original request.
     if must_run("stay"):
-        urls = find_booking_urls(accommodation) or find_booking_urls(user_requirements or "")
-        if urls:
-            progress("Apgyvendinimo detalės ir nuotraukos iš Booking.com...")
-            details = stay_details(urls[0])
+        urls = (find_booking_urls(accommodation) or find_booking_urls(user_requirements or ""))[:MAX_STAYS]
+        stays = []
+        for i, url in enumerate(urls, 1):
+            progress(f"Apgyvendinimo detalės ir nuotraukos iš Booking.com ({i}/{len(urls)})...")
+            details = stay_details(url)
             if details.get("error"):
-                progress(f"Booking.com puslapio nuskaityti nepavyko ({details['error'][:120]}) -- "
-                         "naudojamas nakvynės aprašymas.")
-        else:
-            details = {}
-        save("stay", json.dumps(details, ensure_ascii=False))
-    stay = json.loads(out.get("stay") or "{}")
+                progress(f"Booking.com puslapio nuskaityti nepavyko ({url.rsplit('/', 1)[-1]}: "
+                         f"{details['error'][:120]}) -- naudojamas nakvynės aprašymas.")
+            stays.append(details)
+        save("stay", json.dumps(stays, ensure_ascii=False))
+    stays = json.loads(out.get("stay") or "[]")
+    if isinstance(stays, dict):  # saved before several stays were supported
+        stays = [stays] if stays else []
 
     # --- itinerary + logistics gate ----------------------------------------
     if must_run("itinerary"):
@@ -465,7 +469,7 @@ def run_from_stage(
     # Stop photos and dish photos are shipped together.
     all_images = ImageResults(
         images=[*images.images, *(d.image for d in food.dishes if d.image),
-                *(FoundImage(**p) for p in stay.get("photos", []))],
+                *(FoundImage(**p) for st in stays for p in st.get("photos", []))],
         skipped=images.skipped,
     )
 
@@ -486,7 +490,7 @@ def run_from_stage(
             "accommodation": accommodation,
             # Booked property: name, address, description, rating and photos
             # (local_path) read from its booking.com page; {} if none.
-            "stay": stay,
+            "stays": stays,
             "itinerary": out["itinerary"],
             "day_routes": day_routes(Itinerary.model_validate_json(out["itinerary"])),
             "logistics": _page_logistics(logistics_report),
