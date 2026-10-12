@@ -42,6 +42,23 @@
   .chip { display: inline-block; padding: 1px 8px; margin: 0 4px 4px 0; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); font-family: ui-monospace, Consolas, monospace; }
   .chip.deny { color: var(--err); border-color: rgba(230,128,122,.35); }
   .chip.model { color: var(--accent-2); border-color: var(--accent); }
+  .agent .via { margin-top: 4px; font-size: 11px; color: var(--text-dim); }
+  .agent .via.ext { color: #8ab4f8; }
+  select, .form input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  select:disabled { opacity: .5; }
+  .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 13px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger:hover { border-color: var(--err); color: var(--err); }
+  .form { display: grid; grid-template-columns: 170px 1fr; gap: 8px 12px; align-items: center; font-size: 13px; }
+  .form label { color: var(--text-dim); }
+  .form .row { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .hint { font-size: 12px; color: var(--text-dim); }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  table.providers { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.providers th, table.providers td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.providers th { color: var(--text-dim); font-weight: 500; font-size: 12px; }
+  @media (max-width: 700px) { .form { grid-template-columns: 1fr; } table.providers .opt { display: none; } }
   details > summary { cursor: pointer; font-size: 13px; color: var(--text-dim); padding: 4px 0; }
   details > summary:hover { color: var(--text); }
   pre { margin: 6px 0 0; padding: 10px; background: #0b0d11; border: 1px solid var(--border); border-radius: 6px; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.55; max-height: 60vh; overflow: auto; }
@@ -83,6 +100,7 @@ const chips = (list, cls = '') => (list && list.length) ? list.map(t => `<span c
 // -- the nav, URL hash (#<id>/<sub>) and back/forward all follow automatically.
 const SECTIONS = [
   { id: 'agents', label: '🤖 Agentai', title: 'Agentai', render: renderAgents },
+  { id: 'providers', label: '🔌 AI tiekėjai', title: 'AI tiekėjai', render: renderProviders },
 ];
 
 function route() {
@@ -102,17 +120,136 @@ document.getElementById('settings-nav').innerHTML =
 window.addEventListener('hashchange', route);
 
 async function renderAgents(box, sub) {
-  box.innerHTML = `<p class="intro">Kiekvienas agentas – atskiras <code>claude -p</code> kvietimas. Modelis ir nustatymai rodomi iš paskutinio tikro kvietimo; užduotis – tai, kas agentui buvo nusiųsta.</p>
+  box.innerHTML = `<p class="intro">Kiekvienas agentas kviečiamas per Native Claude (<code>claude -p</code>) arba jam priskirtą AI tiekėją. Modelis ir nustatymai rodomi iš paskutinio tikro kvietimo; užduotis – tai, kas agentui buvo nusiųsta.</p>
     <div class="grid" id="agents"></div><div id="detail"></div>`;
-  agents = await (await fetch('/api/agents')).json();
+  [agents, providerData] = await Promise.all([
+    fetch('/api/agents').then(r => r.json()), fetch('/api/providers').then(r => r.json())]);
   document.getElementById('agents').innerHTML = agents.map(a => {
     const model = modelText(a.meta);
+    const via = providerName(a.provider_id);
     return `<button class="agent" data-stage="${a.stage}" onclick="openAgent('${a.stage}')">
       <div class="name">${esc(a.label)}<span class="count">${a.count} kviet.</span></div>
       <div class="model ${model ? '' : 'none'}">${model ? esc(model) : (a.count ? 'modelis nežinomas (seni įrašai)' : 'dar nekviestas')}</div>
+      <div class="via ${via ? 'ext' : ''}">${via ? '🔌 ' + esc(via) : 'Native Claude'}</div>
     </button>`;
   }).join('');
   if (sub && agents.some(a => a.stage === sub)) showAgent(sub);
+}
+
+let providerData = { types: {}, providers: [] };
+
+function providerName(id) {
+  const p = providerData.providers.find(x => x.id === id);
+  return p ? `${p.name} (${p.model})` : null;
+}
+
+function providerSelect(a) {
+  const opts = [`<option value="">Native Claude (claude -p)</option>`].concat(providerData.providers.map(p =>
+    `<option value="${p.id}" ${p.id === a.provider_id ? 'selected' : ''}>${esc(p.name)} – ${esc(p.model)}</option>`));
+  return `<select onchange="setAgentProvider('${a.stage}', this.value)" ${a.needs_bash ? 'disabled' : ''}>${opts.join('')}</select>`
+    + (providerData.providers.length ? '' : ` <a href="#providers" style="color:var(--accent-2);font-size:12px">+ pridėti AI tiekėją</a>`);
+}
+
+async function setAgentProvider(stage, value) {
+  const res = await fetch(`/api/agents/${encodeURIComponent(stage)}/provider`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider_id: value ? Number(value) : null }),
+  });
+  const msg = document.getElementById('prov-msg');
+  if (!res.ok) { msg.className = 'hint msg err'; msg.textContent = (await res.json()).detail || 'Nepavyko išsaugoti'; return; }
+  const a = agents.find(x => x.stage === stage);
+  a.provider_id = value ? Number(value) : null;
+  msg.className = 'hint msg ok';
+  msg.textContent = '✓ Išsaugota – taikoma nuo kito šio agento kvietimo.';
+  const via = document.querySelector(`.agent[data-stage="${CSS.escape(stage)}"] .via`);
+  const name = providerName(a.provider_id);
+  via.className = 'via ' + (name ? 'ext' : '');
+  via.textContent = name ? '🔌 ' + name : 'Native Claude';
+}
+
+// --- AI tiekėjai -----------------------------------------------------------
+async function renderProviders(box) {
+  providerData = await (await fetch('/api/providers')).json();
+  const rows = providerData.providers.map(p => `<tr>
+      <td><b>${esc(p.name)}</b></td><td class="opt">${esc(providerData.types[p.type] || p.type)}</td>
+      <td><code>${esc(p.model)}</code></td><td class="opt"><code>${esc(p.api_key_hint)}</code></td>
+      <td style="white-space:nowrap"><button class="btn" onclick="testProvider(${p.id}, this)">Tikrinti</button>
+        <button class="btn" onclick="editProvider(${p.id})">Keisti</button>
+        <button class="btn danger" onclick="deleteProvider(${p.id})">Šalinti</button></td></tr>`).join('');
+  box.innerHTML = `
+    <p class="intro">Išoriniai AI API, kuriuos galima priskirti agentams (⚙️ Agentai → „AI vykdymas“). Raktai saugomi konsolės duomenų bazėje ir naršyklei nerodomi.</p>
+    <section class="card"><h3>Sukonfigūruoti tiekėjai</h3>
+      ${providerData.providers.length ? `<table class="providers"><tr><th>Pavadinimas</th><th class="opt">Tipas</th><th>Modelis</th><th class="opt">Raktas</th><th></th></tr>${rows}</table>`
+        : '<p class="empty">Dar nėra. Visi agentai naudoja Native Claude.</p>'}
+    </section>
+    <section class="card"><h3 id="pf-title">Naujas tiekėjas</h3>
+      <form class="form" id="pf" onsubmit="saveProvider(event)">
+        <input type="hidden" name="id">
+        <label>Pavadinimas</label><input name="name" required placeholder="pvz. Gemini Pro">
+        <label>Tipas</label><select name="type" onchange="syncProviderForm()">${Object.entries(providerData.types)
+          .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select>
+        <label class="base">API adresas</label><input class="base" name="base_url" placeholder="https://api.openai.com/v1">
+        <label>Modelis</label><input name="model" required placeholder="gemini-2.5-pro">
+        <label>API raktas</label><input name="api_key" type="password" autocomplete="off" placeholder="">
+        <div class="row"><button class="btn primary" type="submit">Išsaugoti</button>
+          <button class="btn" type="button" onclick="resetProviderForm()">Atšaukti</button>
+          <span class="hint msg" id="pf-msg"></span></div>
+      </form>
+    </section>`;
+  syncProviderForm();
+}
+
+function syncProviderForm() {
+  const f = document.getElementById('pf');
+  const openai = f.type.value === 'openai';
+  f.querySelectorAll('.base').forEach(el => el.style.display = openai ? '' : 'none');
+  f.model.placeholder = openai ? 'gpt-4.1' : 'gemini-2.5-pro';
+  f.api_key.placeholder = f.id.value ? 'palik tuščią – raktas nesikeičia' : '';
+}
+
+function resetProviderForm() {
+  const f = document.getElementById('pf');
+  f.reset(); f.id.value = '';
+  document.getElementById('pf-title').textContent = 'Naujas tiekėjas';
+  syncProviderForm();
+}
+
+function editProvider(id) {
+  const p = providerData.providers.find(x => x.id === id);
+  const f = document.getElementById('pf');
+  f.id.value = p.id; f.name.value = p.name; f.type.value = p.type;
+  f.base_url.value = p.base_url || ''; f.model.value = p.model; f.api_key.value = '';
+  document.getElementById('pf-title').textContent = 'Keisti: ' + p.name;
+  syncProviderForm();
+  f.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function saveProvider(ev) {
+  ev.preventDefault();
+  const f = ev.target, id = f.id.value;
+  const body = Object.fromEntries(['name', 'type', 'base_url', 'model', 'api_key'].map(k => [k, f[k].value]));
+  const res = await fetch(id ? `/api/providers/${id}` : '/api/providers', {
+    method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const msg = document.getElementById('pf-msg');
+  if (!res.ok) { msg.className = 'hint msg err'; msg.textContent = (await res.json()).detail || 'Nepavyko'; return; }
+  route();
+}
+
+async function deleteProvider(id) {
+  const p = providerData.providers.find(x => x.id === id);
+  if (!confirm(`Pašalinti „${p.name}“? Jį naudojantys agentai grįš prie Native Claude.`)) return;
+  await fetch(`/api/providers/${id}`, { method: 'DELETE' });
+  route();
+}
+
+async function testProvider(id, btn) {
+  btn.disabled = true; btn.textContent = 'Tikrinama...';
+  const out = await (await fetch(`/api/providers/${id}/test`, { method: 'POST' })).json();
+  btn.disabled = false;
+  btn.textContent = out.ok ? '✓ Veikia' : '✗ Klaida';
+  btn.title = out.ok ? out.reply : out.error;
+  if (!out.ok) alert(out.error);
 }
 
 function openAgent(stage) { location.hash = 'agents/' + stage; }
@@ -127,7 +264,10 @@ async function showAgent(stage) {
       <h2>${esc(a.label)}</h2>
       <p class="desc">${esc(a.description)}</p>
       <dl>
-        <dt>AI modelis</dt><dd>${m && modelText(m) ? chips(m.models, 'model') : `<span class="empty">${a.count ? 'nežinomas – įrašai iš prieš atnaujinimą' : 'dar nekviestas'}</span>`}${m && m.model_flag ? ` <span class="empty">(--model ${esc(m.model_flag)})</span>` : (m ? ' <span class="empty">(CLI numatytasis)</span>' : '')}</dd>
+        <dt>AI vykdymas</dt><dd>${providerSelect(a)}<div class="hint" id="prov-msg">${a.needs_bash
+          ? 'Šis agentas per Bash naudoja projekto įrankius (maršrutai, keliai, nuotraukos) – juos gali vykdyti tik Native Claude.'
+          : 'Taikoma nuo kito šio agento kvietimo. Išorinis modelis gauna tą patį sistemos promptą ir užduotį; WebSearch/WebFetch → Gemini Google Search / URL context.'}</div></dd>
+        <dt>Paskutinio kvietimo modelis</dt><dd>${m && modelText(m) ? chips(m.models, 'model') : `<span class="empty">${a.count ? 'nežinomas – įrašai iš prieš atnaujinimą' : 'dar nekviestas'}</span>`}${m && m.model_flag ? ` <span class="empty">(--model ${esc(m.model_flag)})</span>` : (m ? ' <span class="empty">(CLI numatytasis)</span>' : '')}</dd>
         <dt>Kodas</dt><dd><code>${esc(a.module)}</code></dd>
         <dt>Sistemos promptas</dt><dd><code>prompts/${esc(a.prompt_file || '–')}</code></dd>
         <dt>Leidžiami įrankiai</dt><dd>${m ? chips(m.allowed_tools) : '–'}</dd>

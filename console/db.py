@@ -47,6 +47,24 @@ CREATE TABLE IF NOT EXISTS trip_agent_calls (
     response TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- External AI endpoints (⚙️ Nustatymai → AI tiekėjai). api_key is stored here
+-- and never returned by the API (console is behind Caddy basic auth on the LAN).
+CREATE TABLE IF NOT EXISTS ai_providers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    base_url TEXT,
+    model TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Which provider an agent stage uses; no row = native claude -p.
+CREATE TABLE IF NOT EXISTS agent_providers (
+    stage TEXT PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES ai_providers(id)
+);
 """
 
 # Columns added after the initial release. CREATE TABLE IF NOT EXISTS is a
@@ -244,3 +262,67 @@ def get_recent_agent_calls(stage: str, limit: int = 20) -> list[sqlite3.Row]:
             "WHERE c.stage = ? ORDER BY c.id DESC LIMIT ?",
             (stage, limit),
         ).fetchall()
+
+
+# --- AI providers -----------------------------------------------------------
+
+def _public_provider(row) -> dict:
+    d = dict(row)
+    key = d.pop("api_key") or ""
+    d["api_key_hint"] = ("…" + key[-4:]) if len(key) > 4 else "••••"
+    return d
+
+
+def list_providers() -> list[dict]:
+    with connect() as conn:
+        return [_public_provider(r) for r in conn.execute("SELECT * FROM ai_providers ORDER BY id")]
+
+
+def get_provider(provider_id: int) -> dict | None:
+    """Full provider, api_key included -- for making calls, never for the API."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM ai_providers WHERE id = ?", (provider_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def save_provider(data: dict, provider_id: int | None = None) -> int:
+    fields = ("name", "type", "base_url", "model")
+    with connect() as conn:
+        if provider_id is None:
+            cur = conn.execute(
+                "INSERT INTO ai_providers (name, type, base_url, model, api_key) VALUES (?, ?, ?, ?, ?)",
+                (*(data.get(f) for f in fields), data["api_key"]),
+            )
+            return cur.lastrowid
+        conn.execute("UPDATE ai_providers SET name = ?, type = ?, base_url = ?, model = ? WHERE id = ?",
+                     (*(data.get(f) for f in fields), provider_id))
+        if data.get("api_key"):  # empty = keep the stored key
+            conn.execute("UPDATE ai_providers SET api_key = ? WHERE id = ?", (data["api_key"], provider_id))
+        return provider_id
+
+
+def delete_provider(provider_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM agent_providers WHERE provider_id = ?", (provider_id,))
+        conn.execute("DELETE FROM ai_providers WHERE id = ?", (provider_id,))
+
+
+def agent_provider_ids() -> dict[str, int]:
+    with connect() as conn:
+        return {r["stage"]: r["provider_id"] for r in conn.execute("SELECT * FROM agent_providers")}
+
+
+def set_agent_provider(stage: str, provider_id: int | None) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM agent_providers WHERE stage = ?", (stage,))
+        if provider_id is not None:
+            conn.execute("INSERT INTO agent_providers (stage, provider_id) VALUES (?, ?)", (stage, provider_id))
+
+
+def provider_for_stage(stage: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT p.* FROM agent_providers a JOIN ai_providers p ON p.id = a.provider_id WHERE a.stage = ?",
+            (stage,),
+        ).fetchone()
+    return dict(row) if row else None

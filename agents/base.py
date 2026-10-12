@@ -24,6 +24,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from agents import providers
+
 DEFAULT_TIMEOUT = 600  # seconds
 
 # No agent may write files: every agent's output is its answer, which the
@@ -37,6 +39,9 @@ ALWAYS_DISALLOWED = ["Write", "Edit", "NotebookEdit"]
 # (console/db.py's trip_agent_calls) instead of only being visible by
 # grepping `ps aux`/journalctl on the box the pipeline runs on.
 _call_sink: contextvars.ContextVar = contextvars.ContextVar("_call_sink", default=None)
+# The stage being run (set by log_calls() even without a sink) -- decides
+# whether the call goes to native claude -p or a configured AI provider.
+_current_stage: contextvars.ContextVar = contextvars.ContextVar("_current_stage", default=None)
 
 
 class _CallSink:
@@ -55,14 +60,18 @@ def log_calls(stage: str, on_llm_call=None):
     A no-op (no context set) when on_llm_call is None, so this is safe to
     wrap around every call site unconditionally.
     """
-    if on_llm_call is None:
-        yield
-        return
-    token = _call_sink.set(_CallSink(stage, on_llm_call))
+    stage_token = _current_stage.set(stage)
     try:
-        yield
+        if on_llm_call is None:
+            yield
+            return
+        token = _call_sink.set(_CallSink(stage, on_llm_call))
+        try:
+            yield
+        finally:
+            _call_sink.reset(token)
     finally:
-        _call_sink.reset(token)
+        _current_stage.reset(stage_token)
 
 # Common install locations the official installer (claude.ai/install.sh) can
 # use, checked if a bare "claude" isn't resolved via PATH. This matters most
@@ -216,6 +225,7 @@ def _invoke_claude(
         except (ValueError, IndexError, AttributeError):
             pass
     started = time.monotonic()
+    provider = providers.provider_for(_current_stage.get())
 
     def _record(response_text: str, payload: dict | None = None) -> None:
         sink = _call_sink.get()
@@ -238,11 +248,24 @@ def _invoke_claude(
             "num_turns": (payload or {}).get("num_turns"),
             "cost_usd": (payload or {}).get("total_cost_usd"),
             "user_input": user_input,
+            "provider": provider["name"] if provider else "Native Claude (claude -p)",
         }
         try:
             sink.on_llm_call(sink.stage, query, response_text, meta)
         except TypeError:  # older 3-argument callbacks
             sink.on_llm_call(sink.stage, query, response_text)
+
+    if provider is not None:
+        schema = None
+        if extra_args and "--json-schema" in extra_args:
+            schema = json.loads(extra_args[extra_args.index("--json-schema") + 1])
+        try:
+            payload = providers.call(provider, system_prompt, user_input, allowed_tools, schema, timeout)
+        except (providers.ProviderError, ValueError) as e:
+            _record(f"ERROR: {provider['name']}: {e}")
+            raise ClaudeCLIError(f"{provider['name']}: {e}") from e
+        _record(json.dumps(payload, ensure_ascii=False), payload)
+        return payload
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)

@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, Body, FastAPI, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sse_starlette.sse import EventSourceResponse
 
+from agents import providers
 from console import config, db
 from orchestrator import CODE_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
 
@@ -33,6 +34,8 @@ _queues: dict[str, asyncio.Queue] = {}
 @app.on_event("startup")
 def on_startup():
     db.init_db()
+    # Agents with a configured AI provider run on it instead of claude -p.
+    providers.set_resolver(db.provider_for_stage)
     problems = config.require_credentials()
     for problem in problems:
         logger.warning("Startup credential check: %s", problem)
@@ -368,12 +371,15 @@ def agents_page():
 @app.get("/api/agents")
 def agents_overview():
     stats = {row["stage"]: row for row in db.get_agent_overview()}
+    assigned = db.agent_provider_ids()
     out = []
     for stage, module in AGENT_MODULES.items():
         prompt_file = ("critic.md" if stage == "critic" else (STAGE_PROMPTS.get(stage) or [None])[0])
         prompt = (PROMPTS_DIR / prompt_file).read_text() if prompt_file and (PROMPTS_DIR / prompt_file).exists() else ""
         st = stats.get(stage, {})
         out.append({
+            "provider_id": assigned.get(stage),
+            "needs_bash": stage in providers.BASH_AGENTS,
             "stage": stage, "label": STAGE_LABELS.get(stage, "Peržiūra" if stage == "critic" else stage),
             "module": f"agents/{module}.py", "description": _agent_description(module),
             "prompt_file": prompt_file, "prompt": prompt,
@@ -388,3 +394,66 @@ def agent_calls(stage: str, limit: int = 20):
     return [{**{k: r[k] for k in ("id", "trip_id", "created_at", "query", "response")},
              "trip": (r["requirements_text"] or "")[:120],
              "meta": json.loads(r["meta"]) if r["meta"] else None} for r in rows]
+
+
+# --- AI providers (⚙️ Nustatymai → AI tiekėjai) -------------------------------
+
+def _provider_payload(data: dict, creating: bool) -> dict:
+    out = {k: (str(data.get(k) or "").strip() or None) for k in ("name", "type", "base_url", "model", "api_key")}
+    if out["type"] not in providers.PROVIDER_TYPES:
+        raise HTTPException(400, f"type must be one of {list(providers.PROVIDER_TYPES)}")
+    if not out["name"] or not out["model"]:
+        raise HTTPException(400, "name and model are required")
+    if creating and not out["api_key"]:
+        raise HTTPException(400, "api_key is required")
+    return out
+
+
+@app.get("/api/providers")
+def list_ai_providers():
+    return {"types": providers.PROVIDER_TYPES, "providers": db.list_providers()}
+
+
+@app.post("/api/providers")
+def create_ai_provider(data: dict = Body(...)):
+    return {"id": db.save_provider(_provider_payload(data, creating=True))}
+
+
+@app.put("/api/providers/{provider_id}")
+def update_ai_provider(provider_id: int, data: dict = Body(...)):
+    if db.get_provider(provider_id) is None:
+        raise HTTPException(404, "Provider not found")
+    return {"id": db.save_provider(_provider_payload(data, creating=False), provider_id)}
+
+
+@app.delete("/api/providers/{provider_id}")
+def delete_ai_provider(provider_id: int):
+    db.delete_provider(provider_id)
+    return {"deleted": provider_id}
+
+
+@app.post("/api/providers/{provider_id}/test")
+def test_ai_provider(provider_id: int):
+    p = db.get_provider(provider_id)
+    if p is None:
+        raise HTTPException(404, "Provider not found")
+    try:
+        payload = providers.call(p, "You are a connectivity check.", "Reply with exactly: OK", [], None, 60)
+    except providers.ProviderError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "reply": payload["result"][:200]}
+
+
+@app.put("/api/agents/{stage}/provider")
+def set_agent_ai_provider(stage: str, data: dict = Body(...)):
+    if stage not in AGENT_MODULES:
+        raise HTTPException(404, "Unknown agent")
+    provider_id = data.get("provider_id")
+    if provider_id is not None:
+        if stage in providers.BASH_AGENTS:
+            raise HTTPException(400, "This agent runs project tools via Bash -- only native Claude can do that")
+        if db.get_provider(int(provider_id)) is None:
+            raise HTTPException(404, "Provider not found")
+        provider_id = int(provider_id)
+    db.set_agent_provider(stage, provider_id)
+    return {"stage": stage, "provider_id": provider_id}
