@@ -65,6 +65,22 @@ CREATE TABLE IF NOT EXISTS agent_providers (
     stage TEXT PRIMARY KEY,
     provider_id INTEGER NOT NULL REFERENCES ai_providers(id)
 );
+
+-- Agent sets (rinkiniai): named per-agent provider choices. id 1 "Base" is
+-- the original configuration and can't be changed -- copy it to experiment.
+CREATE TABLE IF NOT EXISTS agent_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Provider per agent within a set; no row = native claude -p.
+CREATE TABLE IF NOT EXISTS agent_profile_providers (
+    profile_id INTEGER NOT NULL REFERENCES agent_profiles(id),
+    stage TEXT NOT NULL,
+    provider_id INTEGER NOT NULL REFERENCES ai_providers(id),
+    PRIMARY KEY (profile_id, stage)
+);
 """
 
 # Columns added after the initial release. CREATE TABLE IF NOT EXISTS is a
@@ -74,6 +90,7 @@ _MIGRATIONS = [
     ("trips", "finished_at", "TEXT"),
     ("trip_events", "level", "TEXT NOT NULL DEFAULT 'info'"),
     ("trip_agent_calls", "meta", "TEXT"),
+    ("trips", "profile_id", "INTEGER"),
 ]
 
 
@@ -95,17 +112,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
 
 
+BASE_PROFILE = 1
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
+    with connect() as conn:
+        if conn.execute("SELECT 1 FROM agent_profiles WHERE id = ?", (BASE_PROFILE,)).fetchone() is None:
+            conn.execute("INSERT INTO agent_profiles (id, name) VALUES (?, 'Base')", (BASE_PROFILE,))
+            # Choices made before agent sets existed become the base set.
+            conn.execute("INSERT OR IGNORE INTO agent_profile_providers (profile_id, stage, provider_id) "
+                         "SELECT ?, stage, provider_id FROM agent_providers", (BASE_PROFILE,))
 
 
-def create_trip(trip_id: str, requirements_text: str) -> None:
+def create_trip(trip_id: str, requirements_text: str, profile_id: int | None = None) -> None:
     with connect() as conn:
         conn.execute(
-            "INSERT INTO trips (id, requirements_text) VALUES (?, ?)",
-            (trip_id, requirements_text),
+            "INSERT INTO trips (id, requirements_text, profile_id) VALUES (?, ?, ?)",
+            (trip_id, requirements_text, profile_id or BASE_PROFILE),
         )
 
 
@@ -303,26 +329,63 @@ def save_provider(data: dict, provider_id: int | None = None) -> int:
 
 def delete_provider(provider_id: int) -> None:
     with connect() as conn:
-        conn.execute("DELETE FROM agent_providers WHERE provider_id = ?", (provider_id,))
+        conn.execute("DELETE FROM agent_profile_providers WHERE provider_id = ?", (provider_id,))
         conn.execute("DELETE FROM ai_providers WHERE id = ?", (provider_id,))
 
 
-def agent_provider_ids() -> dict[str, int]:
+def agent_provider_ids(profile_id: int) -> dict[str, int]:
     with connect() as conn:
-        return {r["stage"]: r["provider_id"] for r in conn.execute("SELECT * FROM agent_providers")}
+        return {r["stage"]: r["provider_id"] for r in conn.execute(
+            "SELECT stage, provider_id FROM agent_profile_providers WHERE profile_id = ?", (profile_id,))}
 
 
-def set_agent_provider(stage: str, provider_id: int | None) -> None:
+def set_agent_provider(profile_id: int, stage: str, provider_id: int | None) -> None:
     with connect() as conn:
-        conn.execute("DELETE FROM agent_providers WHERE stage = ?", (stage,))
+        conn.execute("DELETE FROM agent_profile_providers WHERE profile_id = ? AND stage = ?", (profile_id, stage))
         if provider_id is not None:
-            conn.execute("INSERT INTO agent_providers (stage, provider_id) VALUES (?, ?)", (stage, provider_id))
+            conn.execute("INSERT INTO agent_profile_providers (profile_id, stage, provider_id) VALUES (?, ?, ?)",
+                         (profile_id, stage, provider_id))
 
 
-def provider_for_stage(stage: str) -> dict | None:
+def provider_for_stage(stage: str, profile_id: int | None = None) -> dict | None:
     with connect() as conn:
         row = conn.execute(
-            "SELECT p.* FROM agent_providers a JOIN ai_providers p ON p.id = a.provider_id WHERE a.stage = ?",
-            (stage,),
+            "SELECT p.* FROM agent_profile_providers a JOIN ai_providers p ON p.id = a.provider_id "
+            "WHERE a.profile_id = ? AND a.stage = ?",
+            (profile_id or BASE_PROFILE, stage),
         ).fetchone()
     return dict(row) if row else None
+
+
+# --- agent sets (rinkiniai) ---------------------------------------------------
+
+def list_profiles() -> list[dict]:
+    with connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT id, name, created_at FROM agent_profiles ORDER BY id")]
+
+
+def get_profile(profile_id: int) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT id, name FROM agent_profiles WHERE id = ?", (profile_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def copy_profile(source_id: int, name: str) -> int:
+    with connect() as conn:
+        new_id = conn.execute("INSERT INTO agent_profiles (name) VALUES (?)", (name,)).lastrowid
+        conn.execute("INSERT INTO agent_profile_providers (profile_id, stage, provider_id) "
+                     "SELECT ?, stage, provider_id FROM agent_profile_providers WHERE profile_id = ?",
+                     (new_id, source_id))
+        return new_id
+
+
+def rename_profile(profile_id: int, name: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE agent_profiles SET name = ? WHERE id = ?", (name, profile_id))
+
+
+def delete_profile(profile_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM agent_profile_providers WHERE profile_id = ?", (profile_id,))
+        conn.execute("UPDATE trips SET profile_id = ? WHERE profile_id = ?", (BASE_PROFILE, profile_id))
+        conn.execute("DELETE FROM agent_profiles WHERE id = ?", (profile_id,))

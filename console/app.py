@@ -103,16 +103,23 @@ def _run_pipeline(
             log(f"Taikomas pataisymas: {modification}")
         else:
             log("Pradedama..." if stage_name == "requirements" else f"Perleidžiama nuo žingsnio: {stage_name}...")
-        url = run_from_stage(
-            stage_name,
-            cached_outputs=cached_outputs,
-            on_progress=log,
-            on_stage_complete=stage_complete,
-            on_llm_call=lambda stage, query, response, meta=None: db.save_agent_call(trip_id, stage, query, response, meta),
-            modification=modification,
-            user_requirements=requirements_text,
-            change_notes=change_notes,
-        )
+        trip = db.get_trip(trip_id)
+        profile_id = trip["profile_id"] if trip is not None else None
+        profile = db.get_profile(profile_id or db.BASE_PROFILE)
+        if profile and profile["id"] != db.BASE_PROFILE:
+            log(f"Agentų rinkinys: {profile['name']}")
+        with providers.using_profile(profile_id):
+            url = run_from_stage(
+                stage_name,
+                cached_outputs=cached_outputs,
+                on_progress=log,
+                on_stage_complete=stage_complete,
+                on_llm_call=lambda stage, query, response, meta=None: db.save_agent_call(
+                    trip_id, stage, query, response, meta),
+                modification=modification,
+                user_requirements=requirements_text,
+                change_notes=change_notes,
+            )
         db.save_stage_output(trip_id, RESUME_KEY, "")
         db.set_status(trip_id, "done", page_url=url)
         log(f"Puslapis paskelbtas: {url}")
@@ -130,9 +137,12 @@ def _run_pipeline(
 
 
 @app.post("/trips")
-def create_trip(background_tasks: BackgroundTasks, requirements_text: str = Form(...)):
+def create_trip(background_tasks: BackgroundTasks, requirements_text: str = Form(...),
+                profile_id: int | None = Form(None)):
+    if profile_id is not None and db.get_profile(profile_id) is None:
+        raise HTTPException(400, "Unknown agent set")
     trip_id = uuid.uuid4().hex[:12]
-    db.create_trip(trip_id, requirements_text)
+    db.create_trip(trip_id, requirements_text, profile_id)
     _queues[trip_id] = asyncio.Queue()
     background_tasks.add_task(_run_pipeline, trip_id, requirements_text)
     return {"trip_id": trip_id}
@@ -321,6 +331,7 @@ def trip_detail(trip_id: str):
         # stage that's mid-run with no persisted output yet) -- drives the
         # collapsible per-stage call log in the UI.
         "call_stages": db.get_call_stage_summary(trip_id),
+        "profile": db.get_profile(trip["profile_id"] or db.BASE_PROFILE),
     }
 
 
@@ -369,9 +380,9 @@ def agents_page():
 
 
 @app.get("/api/agents")
-def agents_overview():
+def agents_overview(profile_id: int = 1):
     stats = {row["stage"]: row for row in db.get_agent_overview()}
-    assigned = db.agent_provider_ids()
+    assigned = db.agent_provider_ids(profile_id)
     out = []
     for stage, module in AGENT_MODULES.items():
         prompt_file = ("critic.md" if stage == "critic" else (STAGE_PROMPTS.get(stage) or [None])[0])
@@ -448,6 +459,11 @@ def test_ai_provider(provider_id: int):
 def set_agent_ai_provider(stage: str, data: dict = Body(...)):
     if stage not in AGENT_MODULES:
         raise HTTPException(404, "Unknown agent")
+    profile_id = int(data.get("profile_id") or db.BASE_PROFILE)
+    if profile_id == db.BASE_PROFILE:
+        raise HTTPException(400, "Base rinkinys nekeičiamas -- nukopijuok jį ir keisk kopiją")
+    if db.get_profile(profile_id) is None:
+        raise HTTPException(404, "Unknown agent set")
     provider_id = data.get("provider_id")
     if provider_id is not None:
         if stage in providers.BASH_AGENTS:
@@ -455,5 +471,44 @@ def set_agent_ai_provider(stage: str, data: dict = Body(...)):
         if db.get_provider(int(provider_id)) is None:
             raise HTTPException(404, "Provider not found")
         provider_id = int(provider_id)
-    db.set_agent_provider(stage, provider_id)
-    return {"stage": stage, "provider_id": provider_id}
+    db.set_agent_provider(profile_id, stage, provider_id)
+    return {"stage": stage, "provider_id": provider_id, "profile_id": profile_id}
+
+
+# --- agent sets (rinkiniai) ---------------------------------------------------
+
+@app.get("/api/profiles")
+def list_agent_profiles():
+    return {"base_id": db.BASE_PROFILE, "profiles": db.list_profiles()}
+
+
+@app.post("/api/profiles")
+def copy_agent_profile(data: dict = Body(...)):
+    name = str(data.get("name") or "").strip()
+    source = int(data.get("copy_from") or db.BASE_PROFILE)
+    if not name:
+        raise HTTPException(400, "Nurodyk pavadinimą")
+    if db.get_profile(source) is None:
+        raise HTTPException(404, "Unknown agent set")
+    if any(p["name"].lower() == name.lower() for p in db.list_profiles()):
+        raise HTTPException(400, "Toks pavadinimas jau yra")
+    return {"id": db.copy_profile(source, name)}
+
+
+@app.put("/api/profiles/{profile_id}")
+def rename_agent_profile(profile_id: int, data: dict = Body(...)):
+    name = str(data.get("name") or "").strip()
+    if profile_id == db.BASE_PROFILE:
+        raise HTTPException(400, "Base rinkinio pervadinti negalima")
+    if not name or db.get_profile(profile_id) is None:
+        raise HTTPException(400, "Bad request")
+    db.rename_profile(profile_id, name)
+    return {"id": profile_id}
+
+
+@app.delete("/api/profiles/{profile_id}")
+def delete_agent_profile(profile_id: int):
+    if profile_id == db.BASE_PROFILE:
+        raise HTTPException(400, "Base rinkinio ištrinti negalima")
+    db.delete_profile(profile_id)
+    return {"deleted": profile_id}

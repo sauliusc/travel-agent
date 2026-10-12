@@ -42,6 +42,10 @@
   .chip { display: inline-block; padding: 1px 8px; margin: 0 4px 4px 0; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); font-family: ui-monospace, Consolas, monospace; }
   .chip.deny { color: var(--err); border-color: rgba(230,128,122,.35); }
   .chip.model { color: var(--accent-2); border-color: var(--accent); }
+  .profile-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+  .profile-bar .lbl { font-size: 13px; color: var(--text-dim); }
+  .profile-bar .note { flex-basis: 100%; font-size: 12px; color: var(--text-dim); }
+  .profile-bar input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font: inherit; font-size: 13px; }
   .agent .via { margin-top: 4px; font-size: 11px; color: var(--text-dim); }
   .agent .via.ext { color: #8ab4f8; }
   select, .form input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
@@ -120,10 +124,29 @@ document.getElementById('settings-nav').innerHTML =
 window.addEventListener('hashchange', route);
 
 async function renderAgents(box, sub) {
+  const pd = await (await fetch('/api/profiles')).json();
+  profiles = pd.profiles; baseId = pd.base_id;
+  if (!profiles.some(p => p.id === profileId)) profileId = baseId;
+  const isBase = profileId === baseId;
   box.innerHTML = `<p class="intro">Kiekvienas agentas kviečiamas per Native Claude (<code>claude -p</code>) arba jam priskirtą AI tiekėją. Modelis ir nustatymai rodomi iš paskutinio tikro kvietimo; užduotis – tai, kas agentui buvo nusiųsta.</p>
+    <div class="profile-bar">
+      <span class="lbl">Agentų rinkinys:</span>
+      <select onchange="switchProfile(this.value)">${profiles.map(p =>
+        `<option value="${p.id}" ${p.id === profileId ? 'selected' : ''}>${esc(p.name)}${p.id === baseId ? ' (base)' : ''}</option>`).join('')}</select>
+      <button class="btn primary" onclick="showCopyForm()">📋 Kopijuoti konfigūraciją</button>
+      ${isBase ? '' : `<button class="btn" onclick="renameProfile()">Pervadinti</button>
+        <button class="btn danger" onclick="deleteProfile()">Šalinti</button>`}
+      <span id="copy-form" hidden><input id="copy-name" placeholder="Naujo rinkinio pavadinimas">
+        <button class="btn primary" onclick="copyProfile()">Sukurti</button>
+        <button class="btn" onclick="document.getElementById('copy-form').hidden = true">Atšaukti</button></span>
+      <span class="hint msg" id="profile-msg"></span>
+      <div class="note">${isBase
+        ? 'Base – dabartinė konfigūracija; ji nekeičiama. Norėdamas bandyti kitus modelius, nukopijuok ją ir keisk kopiją.'
+        : 'Pakeitimai taikomi kelionėms, sukurtoms su šiuo rinkiniu (rinkinys pasirenkamas kuriant kelionę).'}</div>
+    </div>
     <div class="grid" id="agents"></div><div id="detail"></div>`;
   [agents, providerData] = await Promise.all([
-    fetch('/api/agents').then(r => r.json()), fetch('/api/providers').then(r => r.json())]);
+    fetch('/api/agents?profile_id=' + profileId).then(r => r.json()), fetch('/api/providers').then(r => r.json())]);
   document.getElementById('agents').innerHTML = agents.map(a => {
     const model = modelText(a.meta);
     const via = providerName(a.provider_id);
@@ -137,6 +160,53 @@ async function renderAgents(box, sub) {
 }
 
 let providerData = { types: {}, providers: [] };
+let profiles = [], baseId = 1;
+let profileId = (() => { try { return Number(localStorage.getItem('agentProfile')) || 1; } catch (e) { return 1; } })();
+
+function switchProfile(id) {
+  profileId = Number(id);
+  try { localStorage.setItem('agentProfile', String(profileId)); } catch (e) {}
+  route();
+}
+
+function profileMsg(text, ok) {
+  const m = document.getElementById('profile-msg');
+  m.className = 'hint msg ' + (ok ? 'ok' : 'err'); m.textContent = text;
+}
+
+function showCopyForm() {
+  document.getElementById('copy-form').hidden = false;
+  const cur = profiles.find(p => p.id === profileId);
+  const input = document.getElementById('copy-name');
+  input.value = (cur ? cur.name : 'Base') + ' kopija';
+  input.focus(); input.select();
+}
+
+async function copyProfile() {
+  const name = document.getElementById('copy-name').value.trim();
+  const res = await fetch('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, copy_from: profileId }) });
+  const out = await res.json();
+  if (!res.ok) { profileMsg(out.detail || 'Nepavyko', false); return; }
+  switchProfile(out.id);
+}
+
+async function renameProfile() {
+  const cur = profiles.find(p => p.id === profileId);
+  const name = prompt('Naujas pavadinimas:', cur.name);
+  if (!name || !name.trim()) return;
+  const res = await fetch('/api/profiles/' + profileId, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name.trim() }) });
+  if (!res.ok) { profileMsg((await res.json()).detail || 'Nepavyko', false); return; }
+  route();
+}
+
+async function deleteProfile() {
+  const cur = profiles.find(p => p.id === profileId);
+  if (!confirm(`Ištrinti rinkinį „${cur.name}“? Su juo sukurtos kelionės toliau naudos Base.`)) return;
+  await fetch('/api/profiles/' + profileId, { method: 'DELETE' });
+  switchProfile(baseId);
+}
 
 function providerName(id) {
   const p = providerData.providers.find(x => x.id === id);
@@ -146,14 +216,14 @@ function providerName(id) {
 function providerSelect(a) {
   const opts = [`<option value="">Native Claude (claude -p)</option>`].concat(providerData.providers.map(p =>
     `<option value="${p.id}" ${p.id === a.provider_id ? 'selected' : ''}>${esc(p.name)} – ${esc(p.model)}</option>`));
-  return `<select onchange="setAgentProvider('${a.stage}', this.value)" ${a.needs_bash ? 'disabled' : ''}>${opts.join('')}</select>`
+  return `<select onchange="setAgentProvider('${a.stage}', this.value)" ${a.needs_bash || profileId === baseId ? 'disabled' : ''}>${opts.join('')}</select>`
     + (providerData.providers.length ? '' : ` <a href="#providers" style="color:var(--accent-2);font-size:12px">+ pridėti AI tiekėją</a>`);
 }
 
 async function setAgentProvider(stage, value) {
   const res = await fetch(`/api/agents/${encodeURIComponent(stage)}/provider`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider_id: value ? Number(value) : null }),
+    body: JSON.stringify({ provider_id: value ? Number(value) : null, profile_id: profileId }),
   });
   const msg = document.getElementById('prov-msg');
   if (!res.ok) { msg.className = 'hint msg err'; msg.textContent = (await res.json()).detail || 'Nepavyko išsaugoti'; return; }
@@ -264,7 +334,9 @@ async function showAgent(stage) {
       <h2>${esc(a.label)}</h2>
       <p class="desc">${esc(a.description)}</p>
       <dl>
-        <dt>AI vykdymas</dt><dd>${providerSelect(a)}<div class="hint" id="prov-msg">${a.needs_bash
+        <dt>AI vykdymas</dt><dd>${providerSelect(a)}<div class="hint" id="prov-msg">${profileId === baseId && !a.needs_bash
+          ? 'Base rinkinys nekeičiamas – nukopijuok jį (mygtukas viršuje), kad pasirinktum kitą modelį.'
+          : a.needs_bash
           ? 'Šis agentas per Bash naudoja projekto įrankius (maršrutai, keliai, nuotraukos) – juos gali vykdyti tik Native Claude.'
           : 'Taikoma nuo kito šio agento kvietimo. Išorinis modelis gauna tą patį sistemos promptą ir užduotį; WebSearch/WebFetch → Gemini Google Search / URL context.'}</div></dd>
         <dt>Paskutinio kvietimo modelis</dt><dd>${m && modelText(m) ? chips(m.models, 'model') : `<span class="empty">${a.count ? 'nežinomas – įrašai iš prieš atnaujinimą' : 'dar nekviestas'}</span>`}${m && m.model_flag ? ` <span class="empty">(--model ${esc(m.model_flag)})</span>` : (m ? ' <span class="empty">(CLI numatytasis)</span>' : '')}</dd>

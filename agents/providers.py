@@ -11,8 +11,10 @@ native Claude (see BASH_AGENTS). WebSearch/WebFetch map to Gemini's Google
 Search grounding and URL context; OpenAI-compatible endpoints get no web tools.
 """
 
+import contextvars
 import json
 import re
+from contextlib import contextmanager
 from typing import Callable
 
 import httpx
@@ -28,18 +30,31 @@ PROVIDER_TYPES = {
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 # Set by the console: stage -> provider dict ({type, model, api_key, base_url, name}) or None.
-_resolver: Callable[[str], dict | None] | None = None
+_resolver: Callable[[str, int | None], dict | None] | None = None
+
+# Agent set (rinkinys) of the trip being run; None = the base set.
+_profile: contextvars.ContextVar = contextvars.ContextVar("_profile", default=None)
 
 
-def set_resolver(fn: Callable[[str], dict | None] | None) -> None:
+def set_resolver(fn: Callable[[str, int | None], dict | None] | None) -> None:
     global _resolver
     _resolver = fn
+
+
+@contextmanager
+def using_profile(profile_id: int | None):
+    """Run the enclosed pipeline with this agent set's provider choices."""
+    token = _profile.set(profile_id)
+    try:
+        yield
+    finally:
+        _profile.reset(token)
 
 
 def provider_for(stage: str | None) -> dict | None:
     if stage is None or _resolver is None or stage in BASH_AGENTS:
         return None
-    return _resolver(stage)
+    return _resolver(stage, _profile.get())
 
 
 class ProviderError(RuntimeError):
