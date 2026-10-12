@@ -58,6 +58,22 @@ claude -p "<užklausa>" \
 - **Struktūruotas atsakymas:** `run_structured()` prideda `--json-schema` ir validuoja
   `structured_output` pagal Pydantic modelį.
 
+### 2.1 Išoriniai AI tiekėjai (Gemini, OpenAI-suderinami)
+
+Konsolėje (⚙️ Nustatymai → **AI tiekėjai**) galima pridėti API galinius taškus su raktais
+(`ai_providers` lentelė) ir kiekvienam agentui pasirinkti, kuo jis vykdomas (⚙️ → Agentai →
+„AI vykdymas“; `agent_providers`). `_invoke_claude()` pagal einamą žingsnį (`log_calls`)
+nukreipia kvietimą į `agents/providers.py`, kuris grąžina tokios pat formos atsakymą kaip
+`claude -p` — agentų kodas nesikeičia.
+
+- Tas pats sistemos promptas ir užklausa; struktūruotai išvesčiai prie užklausos pridedama
+  JSON schema, atsakymas validuojamas ta pačia Pydantic schema.
+- `WebSearch`/`WebFetch` → Gemini `google_search` / `url_context`; OpenAI-suderinami
+  tiekėjai web įrankių negauna.
+- Agentai, kurie per `Bash` naudoja projekto įrankius (Logistika, Nuotraukos, Oras/sezonas,
+  Maistas, Planas B — `BASH_AGENTS`), visada vykdomi Native Claude.
+- Raktai saugomi `console.db` ir per API negrąžinami (rodomos tik 4 paskutinės raidės).
+
 ## 3. Žingsniai ir priklausomybės
 
 Eiliškumas — `STAGE_ORDER`, priklausomybės — `STAGE_DEPS` (`orchestrator.py`).
