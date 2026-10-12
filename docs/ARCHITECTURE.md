@@ -73,6 +73,11 @@ nukreipia kvietimą į `agents/providers.py`, kuris grąžina tokios pat formos 
 - Agentai, kurie per `Bash` naudoja projekto įrankius (Logistika, Nuotraukos, Oras/sezonas,
   Maistas, Planas B — `BASH_AGENTS`), visada vykdomi Native Claude.
 - Raktai saugomi `console.db` ir per API negrąžinami (rodomos tik 4 paskutinės raidės).
+- **Agentų rinkiniai** (`agent_profiles`, `agent_profile_providers`): pavadinti tiekėjų
+  pasirinkimų rinkiniai. „Base“ (id 1) — pradinė konfigūracija, nekeičiama; ją galima
+  nukopijuoti nauju pavadinimu ir keisti kopiją. Kelionė kuriama su pasirinktu rinkiniu
+  (`trips.profile_id`); visi jos paleidimai (perleidimas, pataisymai, bandymas iš naujo)
+  naudoja tą rinkinį (`providers.using_profile`).
 
 ## 3. Žingsniai ir priklausomybės
 

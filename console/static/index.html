@@ -71,6 +71,10 @@
   #composer h2 { margin-top: 0; }
   #composer p { color: var(--text-dim); font-size: 14px; }
   textarea { width: 100%; min-height: 160px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; }
+  .profile-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--text-dim); flex-wrap: wrap; }
+  .profile-row select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  .hint-link { color: var(--accent-2); font-size: 12px; text-decoration: none; }
+  .profile-tag { font-size: 11px; color: #8ab4f8; border: 1px solid rgba(138,180,248,.4); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
   button.primary { margin-top: 12px; padding: 10px 22px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
   button.primary:hover { background: var(--accent-2); }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -194,7 +198,11 @@
         <h2>Nauja kelionė</h2>
         <p>Įklijuok kelionės reikalavimus laisvu tekstu — datas, kryptį, keliautojų skaičių, prioritetus.</p>
         <textarea id="requirements-input" placeholder="Albanija, 3 dienos, spalio 2-4, 2 žmonės, automobilis, gamtos objektai..."></textarea>
-        <br>
+        <div class="profile-row">
+          <label for="profile-select">Agentų rinkinys:</label>
+          <select id="profile-select"><option value="1">Base</option></select>
+          <a href="/settings#agents" class="hint-link">tvarkyti</a>
+        </div>
         <button class="primary" id="submit-btn" onclick="submitTrip()">Planuoti</button>
       </div>
     </div>
@@ -203,6 +211,7 @@
       <div id="detail-bar">
         <div class="status">
           <span id="detail-badge" class="badge"></span>
+          <span id="detail-profile" class="profile-tag" hidden></span>
           <span id="detail-current"></span>
         </div>
         <span id="detail-time" class="trip-time"></span>
@@ -296,8 +305,23 @@ function showComposer() {
   document.getElementById('detail').hidden = true;
   document.getElementById('composer').hidden = false;
   document.getElementById('requirements-input').value = '';
+  loadProfiles();
   document.getElementById('requirements-input').focus();
   markActiveInSidebar();
+}
+
+// Agent sets (⚙️ Nustatymai → Agentai); the last one used is preselected.
+async function loadProfiles() {
+  const sel = document.getElementById('profile-select');
+  try {
+    const { profiles, base_id } = await (await fetch('/api/profiles')).json();
+    let last = null;
+    try { last = Number(localStorage.getItem('tripProfile')); } catch (e) {}
+    const chosen = profiles.some(p => p.id === last) ? last : base_id;
+    sel.innerHTML = profiles.map(p =>
+      `<option value="${p.id}" ${p.id === chosen ? 'selected' : ''}>${p.name.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}${p.id === base_id ? ' (base)' : ''}</option>`).join('');
+  } catch (e) { /* keep the Base option */ }
+  sel.onchange = () => { try { localStorage.setItem('tripProfile', sel.value); } catch (e) {} };
 }
 
 async function submitTrip() {
@@ -311,7 +335,8 @@ async function submitTrip() {
     const res = await fetch('/trips', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'requirements_text=' + encodeURIComponent(text),
+      body: 'requirements_text=' + encodeURIComponent(text)
+        + '&profile_id=' + encodeURIComponent(document.getElementById('profile-select').value),
     });
     const { trip_id } = await res.json();
     htmx.ajax('GET', '/trips/list', '#trip-list');
@@ -351,6 +376,11 @@ function renderDetailHeader(trip) {
   const badge = document.getElementById('detail-badge');
   badge.className = 'badge ' + trip.status;
   badge.textContent = STATUS_LABELS[trip.status] || trip.status;
+  const tag = document.getElementById('detail-profile');
+  const prof = trip.profile;
+  tag.hidden = !prof || prof.id === 1;
+  tag.textContent = prof ? '🤖 ' + prof.name : '';
+  tag.title = 'Agentų rinkinys';
   document.getElementById('detail-time').textContent =
     fmtTime(trip.created_at) + (trip.finished_at ? ' → ' + fmtTime(trip.finished_at) : '');
   const req = document.getElementById('detail-req');
