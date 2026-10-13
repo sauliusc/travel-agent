@@ -476,6 +476,15 @@ Critic radinių (`target: itinerary`).
   puslapio atnaujinimui.
 - **„↻ Puslapis“:** puslapis kuriamas iš naujo (naujas dizainas).
 
+### Užklausų istorija kelionės repozitorijoje
+
+Kiekvienas paleidimas (pradinė užklausa, pataisymas, perleidimas nuo žingsnio, bandymas iš
+naujo) kelionės repozitorijoje sukuria `request-history/<data>_<tipas>.md`
+(`tools/run_history.py`): laikas, agentų rinkinys, rezultatas, eiga ir kiekvienas agento
+kvietimas — modelis, vykdytojas, trukmė, užklausa ir atsakymas skaitomu formatu (JSON
+gražiai suformatuotas, HTML puslapis pakeistas užrašu „HTML puslapis sugeneruotas“).
+Jei pirmas paleidimas nepavyko iki repozitorijos sukūrimo, istorija neišsaugoma.
+
 ## 7. Valdymo konsolė
 
 - `console/app.py` (FastAPI), `console/db.py` (SQLite: `trips`, `trip_events`,
