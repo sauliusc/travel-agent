@@ -6,6 +6,7 @@ Run with: uvicorn console.app:app --host 127.0.0.1 --port 8000
 import asyncio
 import importlib
 import json
+import re
 import html
 import logging
 import uuid
@@ -17,6 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agents import providers
 from console import config, db
+from tools import run_history
 from orchestrator import CODE_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
 
 app = FastAPI(title="Travel planning console")
@@ -72,6 +74,36 @@ def _run_pipeline(
     """
     queue = _queues[trip_id]
     done_this_run: list[str] = []
+    # Collected for this run's request-history/*.md in the trip repository.
+    started = run_history.now()
+    events: list[tuple] = []
+    calls: list[dict] = []
+    if modification is not None:
+        kind, kind_slug = "Pataisymas", "pataisymas"
+    elif stage_name == "requirements" and not cached_outputs:
+        kind, kind_slug = "Pradinė užklausa", "pradine-uzklausa"
+    else:
+        kind = f"Perleidimas nuo žingsnio „{STAGE_LABELS.get(stage_name, stage_name)}“"
+        kind_slug = f"perleidimas-{stage_name}"
+
+    def record_call(stage, query, response, meta=None):
+        db.save_agent_call(trip_id, stage, query, response, meta)
+        calls.append({"time": run_history.now(), "stage": stage, "query": query,
+                      "response": response, "meta": meta})
+
+    def save_history(page_url: str | None, status: str, error: str | None = None) -> None:
+        m = re.match(r"https://([^.]+)\.github\.io/([^/]+)/?", page_url or "")
+        if not m:
+            return  # no trip repository yet (first run failed before publishing)
+        try:
+            path = run_history.publish(m.group(1), m.group(2), {
+                "kind": kind, "kind_slug": kind_slug, "started": started, "finished": run_history.now(),
+                "trip_id": trip_id, "profile": profile_name, "status": status, "error": error,
+                "modification": modification, "events": events, "calls": calls,
+            })
+            log(f"Užklausų istorija: {path}")
+        except Exception as e:  # noqa: BLE001 - history is a bonus, never fails the run
+            log(f"Užklausų istorijos išsaugoti nepavyko: {e}", level="error")
 
     def stage_complete(stage: str, output: str) -> None:
         db.save_stage_output(trip_id, stage, output)
@@ -93,7 +125,10 @@ def _run_pipeline(
             "note": request if request and (itinerary_done or not modification) else None,
         }, ensure_ascii=False))
 
+    profile_name = None
+
     def log(message: str, level: str = "info"):
+        events.append((run_history.now(), message))
         db.add_event(trip_id, message, level)
         queue.put_nowait(message)
 
@@ -106,6 +141,7 @@ def _run_pipeline(
         trip = db.get_trip(trip_id)
         profile_id = trip["profile_id"] if trip is not None else None
         profile = db.get_profile(profile_id or db.BASE_PROFILE)
+        profile_name = profile["name"] if profile else None
         if profile and profile["id"] != db.BASE_PROFILE:
             log(f"Agentų rinkinys: {profile['name']}")
         with providers.using_profile(profile_id):
@@ -114,8 +150,7 @@ def _run_pipeline(
                 cached_outputs=cached_outputs,
                 on_progress=log,
                 on_stage_complete=stage_complete,
-                on_llm_call=lambda stage, query, response, meta=None: db.save_agent_call(
-                    trip_id, stage, query, response, meta),
+                on_llm_call=record_call,
                 modification=modification,
                 user_requirements=requirements_text,
                 change_notes=change_notes,
@@ -123,17 +158,25 @@ def _run_pipeline(
         db.save_stage_output(trip_id, RESUME_KEY, "")
         db.set_status(trip_id, "done", page_url=url)
         log(f"Puslapis paskelbtas: {url}")
+        save_history(url, "done")
         log("Baigta.")
     except NotImplementedError as e:
         remember_resume_point()
         db.set_status(trip_id, "failed")
         log(f"Klaida: {e}", level="error")
+        save_history(_trip_page_url(trip_id), "failed", str(e))
     except Exception as e:  # noqa: BLE001 - surface any failure to the console log
         remember_resume_point()
         db.set_status(trip_id, "failed")
         log(f"Nepavyko: {e}", level="error")
+        save_history(_trip_page_url(trip_id), "failed", str(e))
     finally:
         queue.put_nowait(None)  # sentinel: stream ends
+
+
+def _trip_page_url(trip_id: str) -> str | None:
+    trip = db.get_trip(trip_id)
+    return trip["page_url"] if trip is not None else None
 
 
 @app.post("/trips")
