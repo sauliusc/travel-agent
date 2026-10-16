@@ -14,7 +14,8 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().strip(".!").lower()
 
 
-def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], traveler_tips: list[str]) -> list[str]:
+def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], traveler_tips: list[str],
+               booking_search: list[dict] | None = None) -> list[str]:
     problems = []
     for src in sorted({s for s in _IMG_SRC.findall(page_html) if not s.startswith(("http:", "https:", "data:"))}):
         if src not in image_paths:
@@ -25,6 +26,10 @@ def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], tr
         for url in route["urls"]:
             if url not in unescaped:
                 problems.append(f"Day {route['day']}: the day-route button must link exactly to {url}")
+    for stay in booking_search or []:
+        if stay["url"] not in unescaped:
+            problems.append(f"Stay {stay['city']} {stay['checkin']}–{stay['checkout']}: add the Booking.com search "
+                            f"button linking exactly to {stay['url']}")
     if "<!-- PACKING_LIST" not in page_html:
         problems.append("The <!-- PACKING_LIST --> placeholder is missing -- put it back in the packing section")
     if "<!-- TRIP_MAP" not in page_html:

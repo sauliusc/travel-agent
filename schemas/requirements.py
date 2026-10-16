@@ -23,5 +23,11 @@ class TripRequirements(BaseModel):
     priorities: list[str] = Field(
         default_factory=list, description="e.g. ['gamta', 'kultūra', 'poilsis']"
     )
+    accommodation_type: str | None = Field(
+        default=None, description="Preferred kind of stay, e.g. 'apartamentai', 'viešbutis', 'hostelis', if given")
+    max_price_per_night_eur: int | None = Field(
+        default=None, description="Upper limit per night for the whole group in EUR, if given")
+    accommodation_area: str | None = Field(
+        default=None, description="Preferred location, e.g. 'centras', 'prie viešojo transporto', 'rami vieta', if given")
     language: str = Field(default="lt", description="Output language for the generated page")
     notes: str | None = Field(default=None, description="Any free-text constraints not captured above")

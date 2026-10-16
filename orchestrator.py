@@ -51,6 +51,7 @@ from tools.packing_html import inject as inject_packing
 from tools.packing_html import to_template as _packing_template
 from tools.map_html import inject as inject_map, map_data
 from tools.booking import find_urls as find_booking_urls, stay_details
+from tools.booking_links import over_budget, picks, search_links, strip_picks
 from tools.map_html import to_template as _map_template
 
 REPO_PREFIX = "ai-trip-"
@@ -308,10 +309,22 @@ def run_from_stage(
             progress("Nakvynės paieška...")
             with log_calls("accommodation", on_llm_call):
                 booked = _booking_context(user_requirements)
-                save("accommodation", run_accommodation(
-                    f"requirements={requirements_json}\nresearch={out['research']}"
-                    + (f"\nbooked_property (read from the traveller's booking.com link; keep this place "
-                       f"and its link)={booked}" if booked else "")))
+                task = (f"requirements={requirements_json}\nresearch={out['research']}"
+                        + (f"\nbooked_property (read from the traveller's booking.com link; keep this place "
+                           f"and its link)={booked}" if booked else ""))
+                plan_text = run_accommodation(task)
+                # The traveller's price limit is checked in code; one retry if broken.
+                too_expensive = over_budget(plan_text, requirements.max_price_per_night_eur)
+                if too_expensive:
+                    progress("Nakvynė: viršyta kainos riba -- ieškoma pigesnių variantų...")
+                    plan_text = run_accommodation(
+                        f"{task}\n\nYour previous plan:\n{plan_text}\n\nThese recommended picks are above "
+                        f"the traveller's limit of {requirements.max_price_per_night_eur} EUR per night -- "
+                        "replace them with options within the limit and return the complete plan:\n- "
+                        + "\n- ".join(too_expensive))
+                if not picks(plan_text):
+                    progress("Nakvynė: rekomenduojamų vietų sąrašo nėra -- Booking.com paieškos nuorodos nebus sukurtos.")
+                save("accommodation", plan_text)
     accommodation = out["accommodation"]
 
     # Booked property from a booking.com link (code, no agent): details and a
@@ -489,7 +502,9 @@ def run_from_stage(
             "research": out["research"],
             # Current accommodation plan: after a traveller's change it
             # overrides any hotel named in the original request.
-            "accommodation": accommodation,
+            "accommodation": strip_picks(accommodation),
+            # Booking.com search per stay with the trip's dates and group size (code-built).
+            "booking_search": search_links(accommodation, requirements.travelers),
             # Booked property: name, address, description, rating and photos
             # (local_path) read from its booking.com page; {} if none.
             "stays": stays,
@@ -537,7 +552,8 @@ def run_from_stage(
         fixed: list[str] = []
         for attempt in range(MAX_FIX_ITERATIONS):
             code_problems = check_page(out["page"], {i.local_path for i in all_images.images},
-                                       page_context()["day_routes"], logistics_report.traveler_tips)
+                                       page_context()["day_routes"], logistics_report.traveler_tips,
+                                       search_links(accommodation, requirements.travelers))
             if code_problems:
                 progress(f"Puslapio patikra rado {len(code_problems)} netikslumų - taisomas tik puslapis...")
                 notes = "\n".join(f"- {p}" for p in code_problems)
