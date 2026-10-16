@@ -129,8 +129,9 @@ Kiekvienam agentui nurodyta: **kontekstas** (kokie duomenys paduodami), **užkla
   ```
   {requirements JSON}
   ```
-- **Įrankiai:** `WebSearch`, `WebFetch`. **Išvestis:** laisvas tekstas (objektai, keliai,
-  sezoniškumas, šaltiniai).
+- **Įrankiai:** `WebSearch`, `WebFetch`. **Išvestis:** laisvas tekstas: objektai su darbo
+  laiku ir bilietų kainomis, renginiai kelionės datomis, keliai, sezoniškumas, praktinė
+  informacija (dokumentai, pinigai, papročiai, saugumas, pagalbos numeris, transportas), šaltiniai.
 
 ### 4.3 Weather/Season — `agents/weather.py`
 
@@ -377,7 +378,7 @@ Critic radinių (`target: itinerary`).
 ### 4.13 Page Designer — `agents/page_designer.py`
 
 - **Sistemos promptas:** `prompts/page_designer.md`
-- **Kontekstas** (`page_context()`): `language`, `accommodation`, `stays` (Booking.com
+- **Kontekstas** (`page_context()`): `language`, `research` (praktinė informacija ir renginiai), `accommodation`, `stays` (Booking.com
   detalės ir nuotraukos), `itinerary`, `day_routes` (Google Maps dienos maršrutų URL),
   `logistics` (atkarpos be vidinių įrodymų + `traveler_tips`), `budget`, `images`,
   `car_rental`, `food`, `forecast`, `plan_b`; `map_data` ir `packing` — tik nuoroda, kad

@@ -9,10 +9,24 @@ For the destination, find:
   unpaved, 4x4-only, or dangerous for a standard rental car
 - typical overnight cities/towns along a route of this shape
 - local tips on what's overrated or skippable
+- for every candidate stop: opening hours and closed days (weekday closures, seasonal
+  closing, last entry) and the entry ticket price for adults (and children/family if the
+  group has them); "free" or "no ticket" when that's the case
+- events on the trip dates in the places on the route: festivals, concerts, markets, sports
+  events, and public holidays or other days when museums/shops are closed or crowded
+- practical information for travellers (assume they are Lithuanian/EU citizens unless the
+  request says otherwise): entry documents/visa, currency and whether cards are widely
+  accepted or cash is needed, tipping custom, local customs and etiquette worth knowing,
+  safety notes, the emergency phone number, how public transport tickets work (apps,
+  cards), and anything else a first-time visitor should know
 
 Mark every fact with its source URL and, if visible, the date of the source post/article —
 road and logistics information ages quickly and a five-year-old forum post about a road
 condition may no longer be accurate.
 
 Output a structured research summary: a list of candidate stops (name, why recommended,
-source), a list of road/logistics warnings (with source), and seasonal notes.
+opening hours/closed days, ticket price, source), events on the trip dates (name, date,
+place, source), a list of road/logistics warnings (with source), seasonal notes, and a
+"Practical information" section (documents, money, tipping, customs, safety, emergency
+number, public transport). Mark anything you could not confirm as unknown rather than
+guessing.

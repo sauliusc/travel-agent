@@ -10,6 +10,15 @@ Rules:
   stop = flight time - drive time to airport - buffer - check-in/return-car time.
 - Never place a stop the Logistics Validator flagged as a hard failure; use its proposed
   fix instead.
+- Opening hours: work out each day's date and weekday from `start_date`. Never schedule a
+  stop on a day or at a time it is closed (weekday closures, seasonal closing, last entry),
+  using the hours from the research; if hours are unknown, prefer daytime visits and say
+  "darbo laiką verta pasitikrinti" in the note.
+- Put the ticket price and opening hours in the stop's note when known (e.g. "Bilietas
+  12 €, atvira 10:00–18:00, pirmadieniais uždaryta").
+- Events on the trip dates from the research: fit in the ones that match the travellers'
+  interests or that they mentioned (e.g. a concert), and mention crowds or closures they
+  cause on the affected day.
 - Every stop needs real coordinates (lat/lon) — do not approximate or invent them.
 - Stop `notes` are shown to the travellers on the final page, in the trip's language: short,
   friendly and practical (what to see, where to park, what to watch out for). Never put
