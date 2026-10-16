@@ -8,6 +8,8 @@ Extract, when present:
 - return airport (IATA code) and return flight time, if mentioned
 - max driving hours per day the traveler wants (default 4.0 if not stated)
 - priorities (e.g. nature, culture, relaxation, beach)
+- accommodation preferences: kind of stay (apartments, hotel, hostel...), maximum price per
+  night in EUR for the whole group, preferred area (centre, near public transport, quiet...)
 - any explicit constraints ("no off-road driving", "want to avoid city traffic", etc.) as notes
 
 If a field is not mentioned, leave it unset (use the schema's defaults) rather than

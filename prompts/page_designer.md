@@ -31,6 +31,9 @@ Everything you receive has already been checked (routes validated, images verifi
   per item, translated to the trip's language without shortening; `facilities` as a short
   list of chips. A stay with an `error` keeps its card from `accommodation` (no photos).
   A place the traveller booked replaces any other place to stay named elsewhere.
+  For each entry in `booking_search`, the matching stay's card (same city and dates) gets a
+  button "🔎 Booking.com: {checkin}–{checkout}, {N} žm." linking to its `url` exactly as given,
+  `target="_blank"` -- it opens the search with the dates and group already filled in.
 - Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
   from `logistics.legs`), stop notes.
 - At the top of each day, a prominent button that opens the whole day's driving route in

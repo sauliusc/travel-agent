@@ -73,6 +73,7 @@
   textarea { width: 100%; min-height: 160px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; }
   .profile-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--text-dim); flex-wrap: wrap; }
   .profile-row select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  .profile-row input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
   .hint-link { color: var(--accent-2); font-size: 12px; text-decoration: none; }
   .profile-tag { font-size: 11px; color: #8ab4f8; border: 1px solid rgba(138,180,248,.4); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
   button.primary { margin-top: 12px; padding: 10px 22px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
@@ -198,6 +199,14 @@
         <h2>Nauja kelionė</h2>
         <p>Įklijuok kelionės reikalavimus laisvu tekstu — datas, kryptį, keliautojų skaičių, prioritetus.</p>
         <textarea id="requirements-input" placeholder="Albanija, 3 dienos, spalio 2-4, 2 žmonės, automobilis, gamtos objektai..."></textarea>
+        <div class="profile-row" title="Neprivaloma -- tą patį galima parašyti ir tekste">
+          <span>🏠 Nakvynė:</span>
+          <select id="stay-type"><option value="">bet koks tipas</option><option>apartamentai</option>
+            <option>viešbutis</option><option>svečių namai</option><option>hostelis</option></select>
+          <input id="stay-max" type="number" min="1" step="1" placeholder="maks. €/naktį" style="width:120px">
+          <select id="stay-area"><option value="">bet kur</option><option>centre</option>
+            <option>prie viešojo transporto</option><option>ramioje vietoje</option></select>
+        </div>
         <div class="profile-row">
           <label for="profile-select">Agentų rinkinys:</label>
           <select id="profile-select"><option value="1">Base</option></select>
@@ -326,8 +335,18 @@ async function loadProfiles() {
 
 async function submitTrip() {
   const input = document.getElementById('requirements-input');
-  const text = input.value.trim();
+  let text = input.value.trim();
   if (!text) return;
+  // Accommodation preferences from the form are appended to the request text,
+  // so the Requirements agent reads them like anything else the traveller wrote.
+  const prefs = [];
+  const type = document.getElementById('stay-type').value;
+  const max = document.getElementById('stay-max').value;
+  const area = document.getElementById('stay-area').value;
+  if (type) prefs.push(`tipas: ${type}`);
+  if (max) prefs.push(`ne brangiau kaip ${max} € už naktį visai grupei`);
+  if (area) prefs.push(`vieta: ${area}`);
+  if (prefs.length) text += `\n\nApgyvendinimo pageidavimai: ${prefs.join('; ')}.`;
   const btn = document.getElementById('submit-btn');
   btn.disabled = true;
   btn.textContent = 'Siunčiama...';

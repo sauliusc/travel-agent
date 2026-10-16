@@ -457,6 +457,7 @@ Critic radinių (`target: itinerary`).
 | Žingsnis / modulis | Ką daro |
 | --- | --- |
 | `stay` — `tools/booking.py` | Booking.com nuorodos iš nakvynės plano (iki 8): naršyklės užklausa, nepavykus — headless Chromium (Playwright); JSON-LD/OpenGraph → pavadinimas, adresas, įvertinimas, visas aprašymas, patogumai; iki 5 nuotraukų į `image_cache/`. |
+| Booking.com paieška — `tools/booking_links.py` | Iš Nakvynės agento `picks` JSON bloko (miestas, vieta, datos, kaina) kiekvienai nakvynei sukuria Booking.com paieškos nuorodą su datomis ir žmonių skaičiumi (`booking_search` puslapio kontekste) ir patikrina kainos ribą (`max_price_per_night_eur`, vienas pakartojimas). |
 | `map_data` — `tools/map_html.py` | Leaflet žemėlapis iš itinerary: taškai su tooltip (pavadinimas), popup (diena, laikas, Maps), dienų spalvos ir maršrutai. |
 | `forecast` — `tools/forecast.py` | Open-Meteo prognozė iki 16 d.; toliau arba be duomenų — 5 metų klimato vidurkis. |
 | nuotraukos — `tools/image_download.py` | Commons licencijų ir autorių patikra, atsisiuntimas. |
