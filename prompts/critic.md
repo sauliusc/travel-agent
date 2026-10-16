@@ -40,6 +40,10 @@ Check, in order:
    default) at the end of that day, with its stops, driving and route button(s); no Plan B
    for other days.
 
+11. Opening hours: if a stop's note gives opening hours or closed days, check the stop is
+   scheduled on a day and at a time it is open (the page shows each day's date) -- a stop
+   on its closed day is an `itinerary` blocker. A "Praktinė informacija" section is present.
+
 Image paths, day-route URLs, the packing placeholder and the presence of every
 `traveler_tips` entry are already checked by code -- don't spend effort re-listing them.
 

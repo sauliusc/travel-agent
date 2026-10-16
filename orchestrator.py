@@ -144,7 +144,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "plan_b": ["requirements", "itinerary"],
     "packing": ["requirements", "itinerary", "forecast", "car_rental"],
     "budget": ["itinerary", "accommodation", "car_rental", "food"],
-    "page": ["requirements", "accommodation", "stay", "itinerary", "logistics_report", "budget", "map_data", "images",
+    "page": ["requirements", "research", "accommodation", "stay", "itinerary", "logistics_report", "budget", "map_data", "images",
              "car_rental", "food", "forecast", "plan_b", "packing"],
     "deploy_log": ["page", "images", "food"],
 }
@@ -485,6 +485,8 @@ def run_from_stage(
     def page_context() -> dict:
         return {
             "language": requirements.language,
+            # For the practical-info section and events on the trip dates.
+            "research": out["research"],
             # Current accommodation plan: after a traveller's change it
             # overrides any hotel named in the original request.
             "accommodation": accommodation,

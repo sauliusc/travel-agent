@@ -44,6 +44,11 @@ Everything you receive has already been checked (routes validated, images verifi
   a small credit: author, license, link to `source_url`. A stop with no image has no photo.
   Lightbox: pure CSS + JS, click `.spot-thumb` to open fullscreen, no library.
 - Budget summary from `budget`, if present.
+- "ℹ️ Praktinė informacija" section from the "Practical information" in `research`:
+  documents, money and cards, tipping, local customs, safety, the emergency number, public
+  transport tickets -- short bullet points in the trip's language, only what's relevant.
+- Events on the trip dates from `research`: show each in the section of the day it falls on
+  (name, time, place) and, if there are several, a short "🎉 Renginiai kelionės metu" list.
 - "Orų prognozė" section from `forecast.days`: per day the place, date, plain summary,
   min-max temperature, chance of rain, wind. If a day's `source` is `climate`, say plainly
   it's the typical weather for those dates (the exact forecast appears ~2 weeks before the
