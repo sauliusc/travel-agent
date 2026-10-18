@@ -430,9 +430,9 @@ def run_from_stage(
         if todo:
             progress(f"Nuotraukų paieška ({len(todo)} vietoms)...")
             with log_calls("images", on_llm_call):
-                picks = run_images(_only_stops(itin, todo).model_dump_json())
+                image_picks = run_images(_only_stops(itin, todo).model_dump_json())
             progress("Nuotraukų atsisiuntimas ir licencijų patikra...")
-            fresh = download_images(picks)
+            fresh = download_images(image_picks)
             kept += fresh.images
             skipped |= fresh.skipped
             if fresh.skipped:
