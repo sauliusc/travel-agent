@@ -191,8 +191,10 @@ def _invoke_claude(
     session_id = str(uuid.uuid4())
     cmd = [
         _resolve_claude_bin(),
+        # The prompt goes over stdin, not argv: Linux caps a single argument
+        # at 128 KB (MAX_ARG_STRLEN), which a long day plan + review exceeds
+        # ("[Errno 7] Argument list too long").
         "-p",
-        user_input,
         "--append-system-prompt",
         system_prompt,
         "--allowedTools",
@@ -268,7 +270,9 @@ def _invoke_claude(
         return payload
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            cmd, input=user_input, capture_output=True, text=True, timeout=timeout
+        )
     except FileNotFoundError as e:
         _record("ERROR: 'claude' binary not found on PATH")
         raise ClaudeCLIError(

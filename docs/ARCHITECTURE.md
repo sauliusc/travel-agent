@@ -34,7 +34,7 @@ Pagrindiniai principai:
 Visi agentai kviečiami per `agents/base.py` → `_invoke_claude()`:
 
 ```
-claude -p "<užklausa>" \
+echo "<užklausa>" | claude -p \
   --append-system-prompt "<prompts/<agentas>.md turinys>" \
   --allowedTools <leidžiami įrankiai> \
   --disallowedTools Write,Edit,NotebookEdit[,<papildomai uždrausti>] \
@@ -44,6 +44,8 @@ claude -p "<užklausa>" \
   [--json-schema <Pydantic schema>]
 ```
 
+- **Užklausa** perduodama per stdin, ne kaip argumentas — Linux riboja vieną argumentą
+  128 KB (`Argument list too long`).
 - **Modelis:** `--model` nenurodomas — naudojamas Claude Code CLI numatytasis modelis
   (prenumeratos `claude auth login`). Kuris modelis realiai atsakė, įrašoma iš
   `modelUsage` ir matoma konsolėje: ⚙️ → Agentai.
