@@ -15,6 +15,10 @@ An alternative day must:
   daily driving limit as the main plan, lunch 13:00-14:00, paved roads only. Check each
   new driving leg with `python3 tools/route_check.py --from-lat .. --from-lon .. --to-lat ..
   --to-lon ..`, one at a time;
+- move the same way as the main plan (`requirements.transport`): each stop's `arrive_by`
+  is `car` only on a car trip, `walk` up to ~5 km, otherwise `transit` with the best line in
+  `transit` (kind and line, where to board and get off); never a car on a trip without one.
+  Car legs only count toward the driving limit and need the road check;
 - give every stop real coordinates, arrive/depart times and a `maps_query` (name + town +
   country as Google Maps lists it; the street address if the name is ambiguous; empty only
   for a spot with neither) -- Maps links are built by code, leave `google_maps_url` empty;

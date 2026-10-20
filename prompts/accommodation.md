@@ -8,7 +8,8 @@ the closest ones, marked clearly.
 
 Then prefer, in order:
 1. Central location or proximity to the day's main stops (minimizes extra driving)
-2. Free parking on-site (if the travellers have a car)
+2. Free parking on-site (if the travellers have a car); without a car (`transport` is
+   `public_transport`), a short walk to a metro/tram/bus stop or the station instead
 3. Breakfast included (saves morning time)
 4. Late check-in flexibility if that day's schedule runs long
 

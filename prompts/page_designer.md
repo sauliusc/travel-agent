@@ -34,13 +34,20 @@ Everything you receive has already been checked (routes validated, images verifi
   For each entry in `booking_search`, the matching stay's card (same city and dates) gets a
   button "🔎 Booking.com: {checkin}–{checkout}, {N} žm." linking to its `url` exactly as given,
   `target="_blank"` -- it opens the search with the dates and group already filled in.
-- Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
-  from `logistics.legs`), stop notes. Every stop has a small "📍 Google Maps" link to its
+- Day-by-day sections: times, stops, how to get to each stop, stop notes. Each leg from
+  `logistics.legs` is shown with its `icon` exactly as given (🚗 car, 🚶 walk, 🚇/🚌/🚋/🚆...
+  public transport), `distance_km` and `minutes` -- the time in that leg's own mode, never
+  a driving time for a walk -- and, by mode: car -> the road in plain words; walk -> "pėsčiomis"
+  and the way if given; transit -> the `transit` text (line, where to board and get off,
+  ticket). Never write "važiavimas"/driving for a walk or transit leg. Every stop has a small "📍 Google Maps" link to its
   `google_maps_url` exactly as given, `target="_blank"` (also the stops inside Plan B).
-- At the top of each day, a prominent button that opens the whole day's driving route in
-  Google Maps (e.g. "🧭 Dienos maršrutas Google Maps"), using that day's URL from
-  `day_routes` exactly as given, `target="_blank"`. If a day has several URLs, show one
-  button per part ("1 dalis", "2 dalis"); if it has none, show no button.
+- At the top of each day, a prominent button that opens the day's route in Google Maps
+  (e.g. "🧭 Dienos maršrutas Google Maps"), using that day's URL from `day_routes` exactly as
+  given, `target="_blank"`. If a day has several URLs, show one button per URL, labelled by
+  its mode in `modes` (same index): car "🚗 Automobiliu", walk "🚶 Pėsčiomis", transit
+  "🚇 Viešuoju transportu", numbered if a mode repeats; if it has none, show no button.
+- If `car_rental.needed` is false, the travellers have no car: no driving, parking, fuel,
+  car return or car rental anywhere on the page.
 - A map section ("🗺️ Žemėlapis"): put only the line `<!-- TRIP_MAP -->` where the map goes.
   The map (Leaflet, markers with place-name tooltips, day routes) is rendered by code --
   don't load Leaflet or write any map JS/CSS yourself.
@@ -60,8 +67,9 @@ Everything you receive has already been checked (routes validated, images verifi
 - Plan B: at the end of each day whose `plan_b.days[*].needed` is true, a collapsed
   `<details class="plan-b">` with `<summary>🌧 Planas B (jei blogas oras)</summary>`, closed by
   default. Inside: `weather_sensitive`, the alternative's `title`, its stops with times and
-  notes, total driving (`plan_b.driving_minutes[day]`), the day route button(s) from
-  `plan_b.route_urls[day]` used exactly as given, and `tip`. Mention that it ends at the same
+  notes, how to get to each stop (🚗/🚶/🚇 by `arrive_by`, the `transit` line), total
+  driving (`plan_b.driving_minutes[day]`, only with a car), the day route button(s) from
+  `plan_b.route_urls[day]` used exactly as given (labelled by `plan_b.route_modes[day]`), and `tip`. Mention that it ends at the same
   place as the main plan. If that day's forecast shows rain/strong wind, add a one-line hint
   in the day header that Plan B may be the better choice. No Plan B block for other days.
 - "Ką pasiimti" section containing exactly the line `<!-- PACKING_LIST -->` and nothing
@@ -81,7 +89,7 @@ Everything you receive has already been checked (routes validated, images verifi
 - `food.bars`, if any: add each to its day's section as an optional evening visit (why
   it's special, `maps_url` link), and list them in the food section too. No bars section
   if the list is empty.
-- Practical-info card: car return time, flight times, contact placeholders.
+- Practical-info card: car return time (only with a car), flight times, contact placeholders.
 - `<!-- BUILD_TIME -->` placeholder for the deploy workflow to inject.
 
 Output the complete HTML file content, nothing else.

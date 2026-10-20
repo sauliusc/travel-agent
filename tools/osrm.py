@@ -10,6 +10,8 @@ import argparse
 import httpx
 
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving/{from_lon},{from_lat};{to_lon},{to_lat}"
+# The project-osrm.org demo serves only the car profile; FOSSGIS runs a foot one.
+FOOT_URL = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/{from_lon},{from_lat};{to_lon},{to_lat}"
 
 # Mountain roads run well below OSRM's flat-road estimate; apply a correction
 # so the Logistics Validator doesn't repeat the SH74 mistake (an estimated

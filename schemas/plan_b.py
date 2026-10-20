@@ -25,3 +25,4 @@ class PlanBChecked(PlanB):
     """PlanB after the code checks, with per-day driving and route links."""
     driving_minutes: dict[int, int] = Field(default_factory=dict)
     route_urls: dict[int, list[str]] = Field(default_factory=dict)
+    route_modes: dict[int, list[str]] = Field(default_factory=dict, description="route_urls[day][i]'s travel mode")

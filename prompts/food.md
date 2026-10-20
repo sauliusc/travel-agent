@@ -6,7 +6,7 @@ trip's language.
    that day's route or at that night's accommodation (say which in `near`). Strong
    priority for local, traditional family places (tavernas, byrek shops, markets) over
    tourist or international restaurants. Budget-friendly: give a typical price per person.
-   Cover lunch on each driving day and dinner in each overnight place. Prefer places with
+   Cover lunch on each day and dinner in each overnight place. Prefer places with
    good recent reviews; don't include closed or tourist-trap places.
 2. `dishes` -- 5-8 dishes typical of this region: local name, short description, typical
    price range, and which of your `eateries` serve it (`where_to_try`, exact names). For a

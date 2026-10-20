@@ -35,8 +35,12 @@ def _point(stop) -> str:
     return query or _coords(stop)
 
 
-def directions_url(points: list[str]) -> str:
-    params = {"api": "1", "origin": points[0], "destination": points[-1], "travelmode": "driving"}
+# Stop.arrive_by -> Google Maps travelmode.
+TRAVELMODE = {"car": "driving", "walk": "walking", "transit": "transit"}
+
+
+def directions_url(points: list[str], mode: str = "car") -> str:
+    params = {"api": "1", "origin": points[0], "destination": points[-1], "travelmode": TRAVELMODE[mode]}
     if len(points) > 2:
         params["waypoints"] = "|".join(points[1:-1])
     return BASE + urlencode(params, safe=",|")
@@ -55,25 +59,41 @@ def with_place_urls(itinerary: Itinerary) -> Itinerary:
     return itinerary
 
 
+def _segments(stops) -> list[tuple[str, list[str]]]:
+    """Split a day's stops into (mode, points) runs of the same travel mode.
+    Consecutive stops at the same spot are merged. Google Maps can't route
+    transit through waypoints, so every transit leg is a run of its own."""
+    runs: list[tuple[str, list[str]]] = []
+    prev = None  # (point, coords) of the last distinct place
+    for stop in stops:
+        p, here = _point(stop), _coords(stop)
+        if prev is not None and (here == prev[1] or p == prev[0]):
+            continue
+        if prev is not None:
+            mode = getattr(stop, "arrive_by", "car")
+            if runs and runs[-1][0] == mode and mode != "transit":
+                runs[-1][1].append(p)
+            else:
+                runs.append((mode, [prev[0], p]))
+        prev = (p, here)
+    return runs
+
+
 def day_routes(itinerary: Itinerary) -> list[dict]:
-    """Per day: {"day", "title", "urls"} -- one URL, or several parts for a day
-    with more stops than one link allows. Days with fewer than 2 distinct
-    places (e.g. arrival straight to an airport hotel) get no URLs."""
+    """Per day: {"day", "title", "urls", "modes"} -- one URL per run of the
+    same travel mode (a car day is one link), split further when a run has
+    more stops than one link allows; `modes[i]` is urls[i]'s mode (car /
+    walk / transit). Days with fewer than 2 distinct places (e.g. arrival
+    straight to an airport hotel) get no URLs."""
     routes = []
+    step = MAX_STOPS_PER_LINK - 1
     for day in itinerary.days:
-        points: list[str] = []
-        last = None
-        for stop in day.stops:
-            p, here = _point(stop), _coords(stop)
-            if last != here and (not points or points[-1] != p):  # skip consecutive stops at the same spot
-                points.append(p)
-            last = here
-        urls = []
-        if len(points) >= 2:
-            step = MAX_STOPS_PER_LINK - 1
+        urls, modes = [], []
+        for mode, points in _segments(day.stops):
             for start in range(0, len(points) - 1, step):
-                urls.append(directions_url(points[start:start + MAX_STOPS_PER_LINK]))
-        routes.append({"day": day.number, "title": day.title, "urls": urls})
+                urls.append(directions_url(points[start:start + MAX_STOPS_PER_LINK], mode))
+                modes.append(mode)
+        routes.append({"day": day.number, "title": day.title, "urls": urls, "modes": modes})
     return routes
 
 

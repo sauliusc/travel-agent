@@ -10,6 +10,9 @@ evenly along it (endpoints excluded -- towns are always drivable), and ONE
 batched Overpass request for all of them.
 
 `python3 tools/route_check.py --from-lat .. --from-lon .. --to-lat .. --to-lon .. [--samples N]`
+
+`--mode walk` instead gives the walking distance and time (foot routing), so a
+walk between two sights is never shown with a car's travel time.
 """
 
 import argparse
@@ -21,7 +24,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # so the CLI form can import tools/
 
-from tools.osrm import MOUNTAIN_SPEED_FACTOR, OSRM_URL
+from tools.osrm import FOOT_URL, MOUNTAIN_SPEED_FACTOR, OSRM_URL
 from tools.overpass import road_types
 
 
@@ -95,6 +98,36 @@ def leg_check(from_lat: float, from_lon: float, to_lat: float, to_lon: float, sa
     return {"ok": status == "ok", "status": status, "km": km, "minutes": minutes, "text": "\n".join(lines)}
 
 
+# Fallback when the foot router is unreachable: paths wind ~30% over the
+# straight line, at an unhurried 4.5 km/h.
+WALK_DETOUR = 1.3
+WALK_KMH = 4.5
+
+
+def walk_check(from_lat: float, from_lon: float, to_lat: float, to_lon: float) -> dict:
+    """Walking distance/time: {"km", "minutes", "estimated", "text"}. Foot
+    routing on real paths; if that service is down, an estimate from the
+    straight-line distance (never the car time)."""
+    try:
+        url = FOOT_URL.format(from_lon=from_lon, from_lat=from_lat, to_lon=to_lon, to_lat=to_lat)
+        resp = httpx.get(url, params={"overview": "false"}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        route = data["routes"][0] if data.get("code") == "Ok" and data.get("routes") else None
+    except (httpx.HTTPError, ValueError):
+        route = None
+    if route is not None:
+        km = route["distance"] / 1000
+        minutes = max(km / WALK_KMH * 60, route["duration"] / 60)
+        estimated = False
+    else:
+        km = _seg_m([from_lon, from_lat], [to_lon, to_lat]) / 1000 * WALK_DETOUR
+        minutes, estimated = km / WALK_KMH * 60, True
+    text = (f"WALK: {km:.1f} km, {minutes:.0f} min on foot"
+            + (" (estimate from straight-line distance; foot routing unreachable)" if estimated else ""))
+    return {"km": km, "minutes": minutes, "estimated": estimated, "text": text}
+
+
 def check_leg(from_lat: float, from_lon: float, to_lat: float, to_lon: float, samples: int | None = None) -> str:
     return leg_check(from_lat, from_lon, to_lat, to_lon, samples)["text"]
 
@@ -106,8 +139,13 @@ def main() -> None:
     parser.add_argument("--to-lat", type=float, required=True)
     parser.add_argument("--to-lon", type=float, required=True)
     parser.add_argument("--samples", type=int, help="points to check along the route (default: ~1 per 10 km, 3-15)")
+    parser.add_argument("--mode", choices=["car", "walk"], default="car",
+                        help="car: driving time + road type (default); walk: walking distance and time")
     args = parser.parse_args()
-    print(check_leg(args.from_lat, args.from_lon, args.to_lat, args.to_lon, args.samples))
+    if args.mode == "walk":
+        print(walk_check(args.from_lat, args.from_lon, args.to_lat, args.to_lon)["text"])
+    else:
+        print(check_leg(args.from_lat, args.from_lon, args.to_lat, args.to_lon, args.samples))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,10 @@ Check, in order:
    are the property's own listing photos -- fine with the "Nuotraukos: Booking.com" credit.
    A long description of the booked property belongs in a closed `<details>`
    ("Apartamentų aprašymas") under it, not as open text -- target `page`, `minor`.
+5b. Does every leg show its own mode's icon and time (🚶 with a walking time, 🚇/🚌 with the
+   line and transit time, 🚗 only for driving), as in `logistics.legs`? A walk shown with a
+   car time or as "važiavimas", or any car/driving/parking/rental content on a trip without a
+   car (no `car` legs), is a `page` blocker.
 6. Do Google Maps links point to the right place (a query naming a different or same-named
    place elsewhere is a `minor` issue)? Every stop, eatery and bar has its own Maps link.
    Each day with a route must have its day-route button(s) using exactly the given

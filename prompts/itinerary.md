@@ -3,7 +3,21 @@ Validator's validated routes, and the Accommodation Agent's picks into a day-by-
 
 Rules:
 - Each day starts at 09:00 (after breakfast).
-- Respect `max_driving_hours_per_day` from the trip requirements — never schedule more.
+- Respect `max_driving_hours_per_day` from the trip requirements — never schedule more
+  (`driving_minutes` counts car legs only; 0 on a trip without a car).
+- How the travellers move (`requirements.transport`), per stop in `arrive_by` (how they get
+  there from the previous stop):
+  - `car` -- only if `transport` is `car`. On a trip without a car never plan, suggest or
+    mention driving, parking or renting a car.
+  - `walk` -- for places up to ~5 km apart (also on car trips: park once, then walk between
+    the sights of a town). Arrival times must use walking time (~4.5 km/h plus time to look
+    around), never the car time.
+  - `transit` -- public transport for anything further than ~5 km without a car (or where
+    it's clearly better than driving, e.g. a city centre). Put the best option in `transit`:
+    kind and line, where to board and get off ("Metro M2: Rondo ONZ → Dworzec Wileński") --
+    metro/train over bus when it's faster, the most direct line, few changes. Count walking
+    to the stop, waiting and the ride in the arrival time. Typical pattern: one transit ride
+    to a district, then the next sights there on foot.
 - Lunch is a fixed slot, 13:00-14:00, at a specific named place, not left implicit.
 - Reserve a 30-minute buffer before any airport arrival.
 - For the last day, work backwards from the return flight time: departure from the last
@@ -33,7 +47,7 @@ Rules:
   name nor address (a roadside viewpoint) -- coordinates are used then.
 
 Output a structured `Itinerary` (days, each with ordered stops carrying arrival/departure
-times, coordinates and `maps_query`). Google Maps links are built by code -- leave
+times, coordinates, `maps_query`, `arrive_by` and, for transit, `transit`). Google Maps links are built by code -- leave
 `google_maps_url` empty.
 
 When given a current itinerary and issues to fix, change as little as possible: only the

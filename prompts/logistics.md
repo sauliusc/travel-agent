@@ -4,7 +4,19 @@ on paper looked fine, but the actual road (SH74, Osum canyon to Përmet, Albania
 to be a 4x4-only track, and a "quick 1.5h detour" became a dangerous, impassable route for a
 standard rental car.
 
-For every leg of the itinerary:
+Each leg's travel mode is the to-stop's `arrive_by` in the itinerary; give it as the leg's
+`mode`, and `minutes` is the realistic time in that mode:
+- `walk` -- walking distance/time from `route_check --mode walk` (code recomputes it anyway);
+  no road check. A walk over ~5 km is a blocker: public transport instead.
+- `transit` -- confirm with web search (operator site, journey planner) that the named line
+  runs on the trip dates and between those places; give `transit_kind` (metro, bus, tram,
+  trolleybus, train, ferry, funicular), `transit` (line, board/get off, how often, ticket price,
+  in the trip's language) and the door-to-door time (walk to the stop + typical wait + ride).
+  If a clearly better option exists (faster, fewer changes), it's a `note` with the fix.
+  `confirmed` = the line was confirmed.
+- `car` -- the road checks below. On a trip without a car, any car leg is a blocker.
+
+For every car leg of the itinerary:
 1. Run `route_check` once. It returns the real-road distance and duration and the road type
    at points sampled along the actual route: `OK` = paved car-drivable road; `WARNING` = an
    off-road track, an unpaved/rough road, or no drivable road.
@@ -19,7 +31,8 @@ For every leg of the itinerary:
 
 Blockers (the itinerary must change):
 - any leg not confirmed paved and passable for a standard rental car
-- a day whose total realistic driving exceeds `max_driving_hours_per_day`
+- a day whose total realistic driving (car legs) exceeds `max_driving_hours_per_day`
+- a car leg on a trip without a car; a walk over ~5 km; a transit leg with no confirmed line
 - last day arriving at the airport less than 2 hours before the return flight
 
 `passed` is true only with no blockers and every leg confirmed. There is no "ship it with a
@@ -27,5 +40,5 @@ warning" option -- uncertainty is either resolved here or sent back as a blocker
 
 `traveler_tips` go straight onto the trip page for non-technical travellers, in the trip's
 language: a few short, friendly, practical tips based on confirmed facts (e.g. which
-Google Maps detour to avoid and why). Never mention tools, data sources, OSM tags, or
+Google Maps detour to avoid and why; without a car: which ticket or app to buy, a day pass). Never mention tools, data sources, OSM tags, or
 uncertainty there.

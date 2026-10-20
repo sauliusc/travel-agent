@@ -19,6 +19,11 @@ class TripRequirements(BaseModel):
     return_flight_time: str | None = Field(
         default=None, description="Return flight departure time as 'HH:MM', if known"
     )
+    transport: Literal["car", "public_transport"] = Field(
+        default="car",
+        description="How the travellers get between places: 'car' if they rent or bring a car (road "
+        "trip), 'public_transport' if the request has no car (city trip, flying in and getting around "
+        "by metro/bus/train). Walking short distances is part of both.")
     max_driving_hours_per_day: float = Field(default=4.0)
     priorities: list[str] = Field(
         default_factory=list, description="e.g. ['gamta', 'kultūra', 'poilsis']"

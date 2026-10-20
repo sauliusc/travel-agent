@@ -41,7 +41,7 @@ from schemas.forecast import TripForecast
 from schemas.packing import PackingList
 from schemas.plan_b import PlanBChecked
 from schemas.images import FoundImage, ImageResults
-from schemas.logistics import LogisticsReport
+from schemas.logistics import ICONS, LogisticsReport
 from schemas.requirements import TripRequirements
 from schemas.itinerary import Itinerary
 from tools.image_download import download_images
@@ -89,7 +89,9 @@ def _blocker_text(report: LogisticsReport) -> str:
 def _page_logistics(report: LogisticsReport) -> dict:
     # Traveller-facing facts only; `evidence` is internal.
     return {
-        "legs": [leg.model_dump(exclude={"evidence", "confirmed"}) for leg in report.legs],
+        # `icon` per leg (🚗 / 🚶 / 🚇 ...) is picked here, not by the designer.
+        "legs": [{**leg.model_dump(exclude={"evidence", "confirmed"}),
+                  "icon": ICONS.get(leg.transit_kind or leg.mode, "🚌")} for leg in report.legs],
         "traveler_tips": report.traveler_tips,
     }
 
@@ -134,7 +136,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "accommodation": ["requirements", "research"],
     "stay": ["accommodation"],
     "itinerary": ["requirements", "research", "weather", "accommodation"],
-    "logistics_report": ["itinerary"],
+    "logistics_report": ["requirements", "itinerary"],
     "map_data": ["itinerary"],
     "images": ["itinerary"],
     "car_rental": ["requirements"],
@@ -373,7 +375,8 @@ def run_from_stage(
             progress("Logistikos patikra (važiavimo laikai, keliai)..." if attempt == 0
                      else f"Pakartotinė logistikos patikra ({attempt}/{MAX_LOGISTICS_FIXES})...")
             with log_calls("logistics_report", on_llm_call):
-                report = validate(itinerary, previous)
+                report = validate(itinerary, previous, requirements.transport,
+                                  requirements.max_driving_hours_per_day if requirements.transport == "car" else None)
             save("logistics_report", report.model_dump_json())
             if report.ok():
                 return report

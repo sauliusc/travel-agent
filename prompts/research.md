@@ -8,6 +8,9 @@ For the destination, find:
 - known road conditions, especially any road that locals or forum posts describe as
   unpaved, 4x4-only, or dangerous for a standard rental car
 - typical overnight cities/towns along a route of this shape
+- if `transport` is `public_transport` (no car): how to get between the candidate stops --
+  metro/tram/bus/train lines, how often they run, tickets and passes, travel cards or apps --
+  and which stops are close enough to walk between
 - local tips on what's overrated or skippable
 - for every candidate stop: opening hours and closed days (weekday closures, seasonal
   closing, last entry) and the entry ticket price for adults (and children/family if the

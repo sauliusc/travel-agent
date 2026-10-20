@@ -11,11 +11,12 @@ from schemas.itinerary import Itinerary
 from schemas.plan_b import PlanB, PlanBChecked
 from schemas.requirements import TripRequirements
 from tools.maps_links import day_routes, stop_url
-from tools.route_check import leg_check
+from tools.route_check import leg_check, walk_check
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "plan_b.md").read_text()
 TIMEOUT = 1200
 SAME_PLACE_KM = 2.0
+MAX_WALK_KM = 5.0
 
 
 def _km(a, b) -> float:
@@ -23,10 +24,12 @@ def _km(a, b) -> float:
     return math.hypot((a.lon - b.lon) * kx, (a.lat - b.lat) * 110.54)
 
 
-def check(plan_b: PlanB, itinerary: Itinerary, max_driving_hours: float, route=None) -> tuple[list[str], dict[int, int], list[str]]:
+def check(plan_b: PlanB, itinerary: Itinerary, max_driving_hours: float, route=None,
+          transport: str = "car", walk=None) -> tuple[list[str], dict[int, int], list[str]]:
     """(problems the agent must fix, each needed day's driving minutes, legs
-    that couldn't be checked because the road data service was unreachable)."""
-    route = route or leg_check
+    that couldn't be checked because the road data service was unreachable).
+    Each leg is checked in its own travel mode (the stop's `arrive_by`)."""
+    route, walk = route or leg_check, walk or walk_check
     main = {d.number: d for d in itinerary.days}
     problems, minutes, unchecked = [], {}, []
     for alt in plan_b.days:
@@ -45,7 +48,22 @@ def check(plan_b: PlanB, itinerary: Itinerary, max_driving_hours: float, route=N
             problems.append(f"Day {alt.day}: must end at '{day.stops[-1].name}' ({day.stops[-1].lat}, {day.stops[-1].lon}) like the main plan, so the next day still works")
         total = 0.0
         for a, b in zip(alt.stops, alt.stops[1:]):
+            if b.arrive_by == "car" and transport != "car":
+                problems.append(f"Day {alt.day}: {a.name} -> {b.name}: the travellers have no car -- walk "
+                                f"(up to {MAX_WALK_KM:.0f} km) or take public transport")
+                continue
             if _km(a, b) < 0.3:
+                continue
+            if b.arrive_by == "walk":
+                w = walk(a.lat, a.lon, b.lat, b.lon)
+                if w["km"] > MAX_WALK_KM:
+                    problems.append(f"Day {alt.day}: {a.name} -> {b.name} is {w['km']:.1f} km -- too far to "
+                                    "walk, take public transport (name the best line)")
+                continue
+            if b.arrive_by == "transit":
+                if not b.transit.strip():
+                    problems.append(f"Day {alt.day}: {a.name} -> {b.name}: name the best public transport "
+                                    "option in `transit` (line, where to board and get off)")
                 continue
             try:
                 leg = route(a.lat, a.lon, b.lat, b.lon)
@@ -70,13 +88,15 @@ def build(requirements_json: str, itinerary_json: str, forecast_json: str) -> Pl
             f"Weather for the trip dates:\n{forecast_json}")
     tools = ["WebSearch", "WebFetch", "Bash"]
     plan_b = run_structured(SYSTEM_PROMPT, tools, task, PlanB, timeout=TIMEOUT)
-    problems, minutes, unchecked = check(plan_b, itinerary, requirements.max_driving_hours_per_day)
+    problems, minutes, unchecked = check(plan_b, itinerary, requirements.max_driving_hours_per_day,
+                                         transport=requirements.transport)
     # Only real problems go back to the agent -- it can't fix an outage.
     if problems:
         retry = (f"{task}\n\nYour previous Plan B:\n{plan_b.model_dump_json()}\n\n"
                  "It has these problems -- fix them and return the complete Plan B:\n- " + "\n- ".join(problems))
         plan_b = run_structured(SYSTEM_PROMPT, tools, retry, PlanB, timeout=TIMEOUT)
-        problems, minutes, unchecked = check(plan_b, itinerary, requirements.max_driving_hours_per_day)
+        problems, minutes, unchecked = check(plan_b, itinerary, requirements.max_driving_hours_per_day,
+                                             transport=requirements.transport)
     if problems:
         raise ClaudeCLIError("Planas B neatitinka reikalavimų po pataisymo:\n- " + "\n- ".join(problems))
     if unchecked:
@@ -89,7 +109,9 @@ def build(requirements_json: str, itinerary_json: str, forecast_json: str) -> Pl
     for stop in (s for d in plan_b.days for s in d.stops):
         stop.google_maps_url = stop_url(stop)
     needed = [d for d in plan_b.days if d.needed]
-    routes = {r["day"]: r["urls"] for r in day_routes(Itinerary.model_validate(
+    routes = day_routes(Itinerary.model_validate(
         {"days": [{"number": d.day, "title": d.title, "stops": [s.model_dump() for s in d.stops],
-                   "driving_minutes": minutes[d.day], "overnight_city": ""} for d in needed]}))}
-    return PlanBChecked(days=plan_b.days, driving_minutes=minutes, route_urls=routes)
+                   "driving_minutes": minutes[d.day], "overnight_city": ""} for d in needed]}))
+    return PlanBChecked(days=plan_b.days, driving_minutes=minutes,
+                        route_urls={r["day"]: r["urls"] for r in routes},
+                        route_modes={r["day"]: r["modes"] for r in routes})

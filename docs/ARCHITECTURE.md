@@ -121,7 +121,8 @@ Kiekvienam agentui nurodyta: **kontekstas** (kokie duomenys paduodami), **užkla
   ```
 - **Įrankiai:** jokių. **Schema:** `TripRequirements` (destination, trip_type,
   start/end_date, travelers, budget_eur, airport, return_flight_time,
-  max_driving_hours_per_day, priorities, language, notes). **Limitas:** 300 s.
+  transport (`car` | `public_transport`), max_driving_hours_per_day, priorities, language,
+  notes). **Limitas:** 300 s.
 
 ### 4.2 Research — `agents/research.py`
 
@@ -255,6 +256,10 @@ Critic radinių (`target: itinerary`).
   (road data service unreachable -- not a road problem; retry that leg once, then research it as
   unconfirmed). Run legs one after another, not in parallel ... `python3 tools/overpass.py
   --lat .. --lon ..` is only for spot-checking one specific point.
+  Each stop's `arrive_by` says how the travellers get there ... 'walk' legs: `route_check.py
+  --mode walk`; 'transit' legs: confirm the line with web search, door-to-door time and ticket.
+
+  This trip has NO car: ... no driving tips.   ← tik kai transport = public_transport
 
   Previous validation report for an earlier version of this itinerary is below. For a leg with
   the same from/to stops as a leg confirmed there, reuse that result ... check only new or
@@ -264,6 +269,12 @@ Critic radinių (`target: itinerary`).
 - **Įrankiai:** `Bash` (`tools/route_check.py` = OSRM + Overpass, `tools/overpass.py`),
   `WebSearch`, `WebFetch`. **Schema:** `LogisticsReport` (atkarpos, blokatoriai,
   `traveler_tips`). **Limitas:** 1200 s.
+- **Kodas:** `enforce_modes` — atkarpos perstatomos plano tvarka su plano transporto rūšimi
+  (`Stop.arrive_by`: `car` / `walk` / `transit`): ėjimo laikas visada perskaičiuojamas
+  (`route_check.walk_check`, FOSSGIS foot OSRM; nepasiekus — tiesės atstumas ×1,3, 4,5 km/h),
+  ėjimas > 5 km, automobilis kelionėje be automobilio, transportas be linijos ir kitu būdu
+  patikrinta atkarpa — blokatoriai; dienos vairavimo limitas tikrinamas tik automobilio
+  atkarpoms. Puslapiui kiekviena atkarpa gauna `icon` (🚗/🚶/🚇/🚌/🚋/🚆...).
 - **Kodas:** `validate_until_ok` — esant blokatoriams iki 2 kartų kviečia Itinerary `fix`
   ir tikrina iš naujo; nepavykus — `LogisticsBlocked` (puslapis nekuriamas).
 
@@ -294,7 +305,8 @@ Critic radinių (`target: itinerary`).
   {vartotojo tekstas}
   ```
 - **Įrankiai:** `WebSearch`, `WebFetch`. **Schema:** `CarRentalResults` (needed, car types
-  + kainos, 3 įmonės). **Kodas:** tikrina, kad 3 įmonės turi pakankamą įvertinimą ir
+  + kainos, 3 įmonės). **Kodas:** kai `transport` ≠ `car`, agentas nekviečiamas
+  (`needed: false`); tikrina, kad 3 įmonės turi pakankamą įvertinimą ir
   atsiliepimų skaičių. **Limitas:** 900 s.
 
 ### 4.9 Food & Bars — `agents/food.py`
@@ -343,8 +355,9 @@ Critic radinių (`target: itinerary`).
   - {problema}
   ```
 - **Įrankiai:** `WebSearch`, `WebFetch`, `Bash`. **Schema:** `PlanB`. **Limitas:** 1200 s.
-- **Kodas:** ta pati pradžia ir pabaiga kaip pagrindinio plano dieną, keliai per
-  `route_check` (asfaltuoti), vairavimo limitas; kelių tarnybos sutrikimas fiksuojamas kaip
+- **Kodas:** ta pati pradžia ir pabaiga kaip pagrindinio plano dieną, automobilio keliai per
+  `route_check` (asfaltuoti), vairavimo limitas; be automobilio — jokių `car` atkarpų, ėjimas
+  ≤ 5 km, transportui — nurodyta linija; maršruto nuorodos su `route_modes`; kelių tarnybos sutrikimas fiksuojamas kaip
   „nepatikrinta“, ne kaip klaida.
 
 ### 4.11 Packing Planner — `agents/packing.py`
@@ -469,7 +482,7 @@ Critic radinių (`target: itinerary`).
 | `map_data` — `tools/map_html.py` | Leaflet žemėlapis iš itinerary: taškai su tooltip (pavadinimas), popup (diena, laikas, Maps), dienų spalvos ir maršrutai. |
 | `forecast` — `tools/forecast.py` | Open-Meteo prognozė iki 16 d.; toliau arba be duomenų — 5 metų klimato vidurkis. |
 | nuotraukos — `tools/image_download.py` | Commons licencijų ir autorių patikra, atsisiuntimas. |
-| `day_routes` — `tools/maps_links.py` | Google Maps dienos maršruto URL — vietos pavadinimais (`maps_query`: pavadinimas + miestas, dviprasmiškai — adresas), be jo — koordinatės. Taip pat kiekvienos stotelės, užeigos ir baro Google Maps nuoroda. |
+| `day_routes` — `tools/maps_links.py` | Google Maps dienos maršruto URL, po vieną kiekvienai tos pačios transporto rūšies atkarpų sekai (`modes`: automobiliu / pėsčiomis / viešuoju transportu — transitas be tarpinių taškų, todėl kiekviena tokia atkarpa atskirai) — vietos pavadinimais (`maps_query`: pavadinimas + miestas, dviprasmiškai — adresas), be jo — koordinatės. Taip pat kiekvienos stotelės, užeigos ir baro Google Maps nuoroda. |
 | `deploy_log` — `agents/cicd.py` + `tools/github.py` | Repozitorija `ai-trip-*`, `index.html` + nuotraukos, GitHub Pages. |
 
 ## 6. Pakartotinis paleidimas ir pataisymai

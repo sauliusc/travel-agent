@@ -6,7 +6,11 @@ Extract, when present:
 - start_date, end_date, number of travelers
 - budget in EUR, if mentioned
 - return airport (IATA code) and return flight time, if mentioned
-- max driving hours per day the traveler wants (default 4.0 if not stated)
+- `transport` -- how they get around: `car` if they rent or bring a car (a road trip, "su
+  automobiliu", "nuomosimės mašiną", several regions far apart with no other way mentioned);
+  `public_transport` if they don't (a city trip, "be automobilio", "viešuoju transportu",
+  "pėsčiomis", flying into one city and staying there). Walking is part of both.
+- max driving hours per day the traveler wants (default 4.0 if not stated; only matters with a car)
 - priorities (e.g. nature, culture, relaxation, beach)
 - accommodation preferences: kind of stay (apartments, hotel, hostel...), maximum price per
   night in EUR for the whole group, preferred area (centre, near public transport, quiet...)
