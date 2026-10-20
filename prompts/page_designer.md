@@ -35,7 +35,8 @@ Everything you receive has already been checked (routes validated, images verifi
   button "🔎 Booking.com: {checkin}–{checkout}, {N} žm." linking to its `url` exactly as given,
   `target="_blank"` -- it opens the search with the dates and group already filled in.
 - Day-by-day sections: times, stops, driving per leg (distance, time, road in plain words
-  from `logistics.legs`), stop notes.
+  from `logistics.legs`), stop notes. Every stop has a small "📍 Google Maps" link to its
+  `google_maps_url` exactly as given, `target="_blank"` (also the stops inside Plan B).
 - At the top of each day, a prominent button that opens the whole day's driving route in
   Google Maps (e.g. "🧭 Dienos maršrutas Google Maps"), using that day's URL from
   `day_routes` exactly as given, `target="_blank"`. If a day has several URLs, show one
@@ -70,7 +71,9 @@ Everything you receive has already been checked (routes validated, images verifi
   name, rating with review count and source, car class, estimated total price, the `why`
   sentence, pickup place, a booking link -- plus `car_rental.tips`.
 - "Kur pavalgyti" section: `food.eateries` grouped by day, each with what it's near, kind,
-  typical price per person, the `why` sentence and a "Žemėlapyje" link (`maps_url`). Also
+  typical price per person, the `why` sentence and a "📍 Google Maps" link (`maps_url`
+  exactly as given). Wherever an eatery or bar is mentioned (also in a day's section), it
+  links to its `maps_url`. Also
   mention the relevant eatery in that day's section (lunch/dinner).
 - "Ką paragauti" section: `food.dishes` as cards -- photo (`image.local_path`, with author +
   license + source credit; no photo if `image` is null), local name, description, price

@@ -18,4 +18,6 @@ trip's language.
    building, famous local tradition, a view that's a reason to go). An ordinary place for
    a drink doesn't qualify. An empty list is a fine answer.
 
-Map links and verified photos are added by code afterwards.
+For every eatery and bar give its `address` (street, number, town) when you can find it --
+the Google Maps link is built from the name plus address, which keeps it from opening a
+same-named place elsewhere. Map links and verified photos are added by code afterwards.

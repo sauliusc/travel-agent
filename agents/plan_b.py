@@ -10,7 +10,7 @@ from agents.base import ClaudeCLIError, run_structured
 from schemas.itinerary import Itinerary
 from schemas.plan_b import PlanB, PlanBChecked
 from schemas.requirements import TripRequirements
-from tools.maps_links import day_routes
+from tools.maps_links import day_routes, stop_url
 from tools.route_check import leg_check
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "plan_b.md").read_text()
@@ -86,6 +86,8 @@ def build(requirements_json: str, itinerary_json: str, forecast_json: str) -> Pl
             + "\nTai ne kelio problema -- pakartok „↻ Planas B“ po kurio laiko."
         )
 
+    for stop in (s for d in plan_b.days for s in d.stops):
+        stop.google_maps_url = stop_url(stop)
     needed = [d for d in plan_b.days if d.needed]
     routes = {r["day"]: r["urls"] for r in day_routes(Itinerary.model_validate(
         {"days": [{"number": d.day, "title": d.title, "stops": [s.model_dump() for s in d.stops],

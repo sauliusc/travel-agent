@@ -25,8 +25,16 @@ Rules:
   internal status there -- no "unverified", tool or agent names, validation details. If
   something is unresolved, that is the Logistics Validator's blocker, not a note.
 
+- Every stop gets a `maps_query` -- what to type into Google Maps to land on exactly that
+  place: its name as Google Maps lists it plus town and country ("Kalaja e Beratit, Berat,
+  Albania"). If the name is ambiguous (several places share it, or it's a generic name like
+  "Old Town" or "Central Market") or not a listed place, use its street address instead
+  ("Rruga Antipatrea 1, Berat 5001, Albania"). Leave it empty only for a spot with neither
+  name nor address (a roadside viewpoint) -- coordinates are used then.
+
 Output a structured `Itinerary` (days, each with ordered stops carrying arrival/departure
-times, coordinates, and a Google Maps URL built from the coordinates).
+times, coordinates and `maps_query`). Google Maps links are built by code -- leave
+`google_maps_url` empty.
 
 When given a current itinerary and issues to fix, change as little as possible: only the
 days the issues require (plus unavoidable knock-on changes), everything else identical.

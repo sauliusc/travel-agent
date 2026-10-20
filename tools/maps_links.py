@@ -1,6 +1,10 @@
-"""Google Maps driving-directions links for each itinerary day, built
-deterministically from the stops' coordinates (not by an LLM, so the link
-always matches the validated plan).
+"""Google Maps links for itinerary days and places, built deterministically
+by code (not by an LLM, so a link always matches the validated plan).
+
+Places are given to Google Maps by name (`Stop.maps_query`: name + town, or
+the street address when the name is ambiguous), so the route shows "Berat
+Castle" rather than "40.708,19.946". A stop without a query falls back to
+its coordinates.
 
 Uses the documented Maps URLs format:
 https://www.google.com/maps/dir/?api=1&origin=..&destination=..&waypoints=..&travelmode=driving
@@ -18,8 +22,17 @@ MAX_STOPS_PER_LINK = MAX_WAYPOINTS + 2
 BASE = "https://www.google.com/maps/dir/?"
 
 
-def _point(stop) -> str:
+SEARCH = "https://www.google.com/maps/search/?api=1&query="
+
+
+def _coords(stop) -> str:
     return f"{stop.lat:.6f},{stop.lon:.6f}"
+
+
+def _point(stop) -> str:
+    # "|" separates waypoints, so a query containing it can't be used.
+    query = " ".join((getattr(stop, "maps_query", "") or "").replace("|", " ").split())
+    return query or _coords(stop)
 
 
 def directions_url(points: list[str]) -> str:
@@ -29,6 +42,19 @@ def directions_url(points: list[str]) -> str:
     return BASE + urlencode(params, safe=",|")
 
 
+def stop_url(stop) -> str:
+    """Google Maps link to a single stop: by name/address, else by coordinates."""
+    return SEARCH + quote(_point(stop))
+
+
+def with_place_urls(itinerary: Itinerary) -> Itinerary:
+    """Set every stop's google_maps_url from its maps_query / coordinates."""
+    for day in itinerary.days:
+        for stop in day.stops:
+            stop.google_maps_url = stop_url(stop)
+    return itinerary
+
+
 def day_routes(itinerary: Itinerary) -> list[dict]:
     """Per day: {"day", "title", "urls"} -- one URL, or several parts for a day
     with more stops than one link allows. Days with fewer than 2 distinct
@@ -36,10 +62,12 @@ def day_routes(itinerary: Itinerary) -> list[dict]:
     routes = []
     for day in itinerary.days:
         points: list[str] = []
+        last = None
         for stop in day.stops:
-            p = _point(stop)
-            if not points or points[-1] != p:  # skip consecutive stops at the same spot
+            p, here = _point(stop), _coords(stop)
+            if last != here and (not points or points[-1] != p):  # skip consecutive stops at the same spot
                 points.append(p)
+            last = here
         urls = []
         if len(points) >= 2:
             step = MAX_STOPS_PER_LINK - 1
@@ -49,6 +77,7 @@ def day_routes(itinerary: Itinerary) -> list[dict]:
     return routes
 
 
-def place_search_url(name: str, city: str) -> str:
-    """Google Maps search link for a named place (restaurant, bar) in a city."""
-    return "https://www.google.com/maps/search/?api=1&query=" + quote(f"{name}, {city}")
+def place_search_url(name: str, city: str, address: str = "") -> str:
+    """Google Maps search link for a named place (restaurant, bar): name plus
+    street address when known (tells apart same-named places), else the city."""
+    return SEARCH + quote(f"{name}, {address.strip() or city}")

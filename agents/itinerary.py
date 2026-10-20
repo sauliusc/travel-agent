@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from agents.base import ClaudeCLIError, _invoke_claude, run_structured
 from schemas.itinerary import Itinerary
+from tools.maps_links import with_place_urls
 
 SYSTEM_PROMPT = (Path(__file__).parent.parent / "prompts" / "itinerary.md").read_text()
 
@@ -45,7 +46,7 @@ def _run(task: str) -> str:
     )
     structured = payload.get("structured_output")
     if structured is not None:
-        return Itinerary.model_validate(structured).model_dump_json()
+        return with_place_urls(Itinerary.model_validate(structured)).model_dump_json()
 
     text = payload.get("result")
     if text is None:
@@ -53,7 +54,7 @@ def _run(task: str) -> str:
             f"claude JSON output missing both 'structured_output' and 'result': {payload!r}"
         )
     try:
-        return Itinerary.model_validate_json(text).model_dump_json()
+        return with_place_urls(Itinerary.model_validate_json(text)).model_dump_json()
     except Exception as e:
         raise ClaudeCLIError(
             f"Itinerary Planner did not return a valid Itinerary: {text[:500]!r}"
@@ -99,4 +100,4 @@ def fix(itinerary_json: str, issues: str) -> tuple[str, str]:
     changed = set(result.changed_days)
     days = [before[d.number] if d.number in before and d.number not in changed else d
             for d in result.itinerary.days]
-    return Itinerary(days=days).model_dump_json(), result.change_summary
+    return with_place_urls(Itinerary(days=days)).model_dump_json(), result.change_summary

@@ -16,6 +16,8 @@ from schemas.images import FoundImage
 class EateryDraft(BaseModel):
     name: str
     city: str
+    address: str = Field(default="", description="street address, so Google Maps finds this exact place "
+                         "(needed when the name is shared by other places); empty if unknown")
     day: int = Field(description="itinerary day it fits")
     near: str = Field(description="the itinerary stop or overnight place it is next to")
     kind: str = Field(description="e.g. 'šeimos taverna', 'byrektorė', 'turgus'")
@@ -39,6 +41,8 @@ class DishDraft(BaseModel):
 class BarDraft(BaseModel):
     name: str
     city: str
+    address: str = Field(default="", description="street address, so Google Maps finds this exact place "
+                         "(needed when the name is shared by other places); empty if unknown")
     day: int
     near: str
     why_special: str = Field(description="what makes it worth visiting, in the trip's language")

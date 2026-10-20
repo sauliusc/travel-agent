@@ -22,7 +22,8 @@ Check, in order:
    are the property's own listing photos -- fine with the "Nuotraukos: Booking.com" credit.
    A long description of the booked property belongs in a closed `<details>`
    ("Apartamentų aprašymas") under it, not as open text -- target `page`, `minor`.
-6. Do Google Maps links resolve to the correct coordinates (spot-check the URL format)?
+6. Do Google Maps links point to the right place (a query naming a different or same-named
+   place elsewhere is a `minor` issue)? Every stop, eatery and bar has its own Maps link.
    Each day with a route must have its day-route button(s) using exactly the given
    `day_routes` URL(s) -- reported as an issue if missing or altered.
 

@@ -29,7 +29,7 @@ def guide(requirements_json: str, itinerary_json: str, accommodation: str) -> Fo
     verified = {img.stop_name: img for img in download_images(picks).images} if picks.images else {}
 
     return FoodGuide(
-        eateries=[Eatery(**e.model_dump(), maps_url=place_search_url(e.name, e.city)) for e in draft.eateries],
+        eateries=[Eatery(**e.model_dump(), maps_url=place_search_url(e.name, e.city, e.address)) for e in draft.eateries],
         dishes=[Dish(**d.model_dump(), image=verified.get(d.name)) for d in draft.dishes],
-        bars=[Bar(**b.model_dump(), maps_url=place_search_url(b.name, b.city)) for b in draft.bars],
+        bars=[Bar(**b.model_dump(), maps_url=place_search_url(b.name, b.city, b.address)) for b in draft.bars],
     )

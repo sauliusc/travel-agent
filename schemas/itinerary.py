@@ -11,7 +11,13 @@ class Stop(BaseModel):
     lon: float
     arrive: str = Field(description="Arrival time as 'HH:MM'")
     depart: str = Field(description="Departure time as 'HH:MM'")
-    google_maps_url: str
+    maps_query: str = Field(
+        default="",
+        description="What to type into Google Maps to find exactly this place: its name plus town and "
+        "country (e.g. 'Kalaja e Beratit, Berat, Albania'). If the name is ambiguous or not a listed "
+        "place, its street address instead. Empty for a spot with neither (a viewpoint on a road) -- "
+        "the coordinates are used then.")
+    google_maps_url: str = Field(default="", description="filled in by code from maps_query / coordinates")
     notes: str | None = Field(default=None, description="e.g. a danger warning or off-road note")
 
 

@@ -207,6 +207,10 @@ Du režimai.
   background jobs or promise to report results later -- there is no later turn.
   ```
 
+Kiekviena stotelė turi `maps_query` (pavadinimas + miestas + šalis; dviprasmiško pavadinimo
+atveju — gatvės adresas; tuščia — koordinatės). `google_maps_url` užpildo kodas
+(`tools/maps_links.py` → `with_place_urls`), ne agentas.
+
 **b) Taisymas (`fix`)** — kviečiamas po vartotojo pataisymo, logistikos blokatorių ar
 Critic radinių (`target: itinerary`).
 
@@ -309,7 +313,8 @@ Critic radinių (`target: itinerary`).
   {nakvynės planas}
   ```
 - **Įrankiai:** `WebSearch`, `WebFetch`, `Bash` (patiekalų nuotraukos per Wikimedia).
-  **Schema:** `FoodGuideDraft`. **Kodas:** prideda Google Maps nuorodas ir patikrintas
+  **Schema:** `FoodGuideDraft`. **Kodas:** prideda Google Maps nuorodas (pavadinimas + `address`, jei
+  žinomas, kitaip miestas) ir patikrintas
   patiekalų nuotraukas (→ `FoodGuide`). **Limitas:** 1200 s.
 
 ### 4.10 Plan B — `agents/plan_b.py`
@@ -448,7 +453,8 @@ Critic radinių (`target: itinerary`).
   blocker|minor, where, problem, fix}]}`.
 - **Ciklas (iki 3 ratų):**
   1. `tools/page_checks.py` (kodas, nemokamai): nuotraukų keliai ∈ manifestas, dienų
-     maršrutų URL, `PACKING_LIST`/`TRIP_MAP` žymės, ranka rašyto žemėlapio nebuvimas,
+     maršrutų URL, kiekvienos stotelės / užeigos / baro Google Maps nuoroda,
+     `PACKING_LIST`/`TRIP_MAP` žymės, ranka rašyto žemėlapio nebuvimas,
      kiekvienas `traveler_tips` puslapyje. Radus — taisomas tik puslapis.
   2. Critic. Nėra `blocker` → baigta (`minor` naujo rato nekelia).
   3. `itinerary` blokatoriai → Itinerary `fix` → Logistika → puslapio atnaujinimas;
@@ -463,7 +469,7 @@ Critic radinių (`target: itinerary`).
 | `map_data` — `tools/map_html.py` | Leaflet žemėlapis iš itinerary: taškai su tooltip (pavadinimas), popup (diena, laikas, Maps), dienų spalvos ir maršrutai. |
 | `forecast` — `tools/forecast.py` | Open-Meteo prognozė iki 16 d.; toliau arba be duomenų — 5 metų klimato vidurkis. |
 | nuotraukos — `tools/image_download.py` | Commons licencijų ir autorių patikra, atsisiuntimas. |
-| `day_routes` — `tools/maps_links.py` | Google Maps dienos maršruto URL. |
+| `day_routes` — `tools/maps_links.py` | Google Maps dienos maršruto URL — vietos pavadinimais (`maps_query`: pavadinimas + miestas, dviprasmiškai — adresas), be jo — koordinatės. Taip pat kiekvienos stotelės, užeigos ir baro Google Maps nuoroda. |
 | `deploy_log` — `agents/cicd.py` + `tools/github.py` | Repozitorija `ai-trip-*`, `index.html` + nuotraukos, GitHub Pages. |
 
 ## 6. Pakartotinis paleidimas ir pataisymai

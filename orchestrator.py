@@ -46,7 +46,7 @@ from schemas.requirements import TripRequirements
 from schemas.itinerary import Itinerary
 from tools.image_download import download_images
 from tools.forecast import trip_forecast
-from tools.maps_links import day_routes
+from tools.maps_links import day_routes, with_place_urls
 from tools.packing_html import inject as inject_packing
 from tools.packing_html import to_template as _packing_template
 from tools.map_html import inject as inject_map, map_data
@@ -508,7 +508,7 @@ def run_from_stage(
             # Booked property: name, address, description, rating and photos
             # (local_path) read from its booking.com page; {} if none.
             "stays": stays,
-            "itinerary": out["itinerary"],
+            "itinerary": with_place_urls(Itinerary.model_validate_json(out["itinerary"])).model_dump_json(),
             "day_routes": day_routes(Itinerary.model_validate_json(out["itinerary"])),
             "logistics": _page_logistics(logistics_report),
             "budget": out["budget"],
@@ -520,6 +520,13 @@ def run_from_stage(
             "plan_b": plan_b.model_dump(),
             "packing": "rendered by code -- only place the <!-- PACKING_LIST --> placeholder",
         }
+
+    def place_links() -> dict[str, str]:
+        """Every recommended place -> its Google Maps link, for check_page."""
+        itinerary = with_place_urls(Itinerary.model_validate_json(out["itinerary"]))
+        links = {f"Day {d.number}, {s.name}": s.google_maps_url for d in itinerary.days for s in d.stops}
+        links.update({p.name: p.maps_url for p in [*food.eateries, *food.bars]})
+        return links
 
     repo_name = _slugify(requirements)
 
@@ -553,7 +560,8 @@ def run_from_stage(
         for attempt in range(MAX_FIX_ITERATIONS):
             code_problems = check_page(out["page"], {i.local_path for i in all_images.images},
                                        page_context()["day_routes"], logistics_report.traveler_tips,
-                                       search_links(accommodation, requirements.travelers))
+                                       search_links(accommodation, requirements.travelers),
+                                       place_links())
             if code_problems:
                 progress(f"Puslapio patikra rado {len(code_problems)} netikslumų - taisomas tik puslapis...")
                 notes = "\n".join(f"- {p}" for p in code_problems)

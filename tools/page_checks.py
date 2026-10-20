@@ -15,7 +15,9 @@ def _norm(text: str) -> str:
 
 
 def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], traveler_tips: list[str],
-               booking_search: list[dict] | None = None) -> list[str]:
+               booking_search: list[dict] | None = None, place_links: dict[str, str] | None = None) -> list[str]:
+    """place_links: place name -> its Google Maps URL (stops, eateries, bars);
+    every one must be linked from the page."""
     problems = []
     for src in sorted({s for s in _IMG_SRC.findall(page_html) if not s.startswith(("http:", "https:", "data:"))}):
         if src not in image_paths:
@@ -26,6 +28,9 @@ def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], tr
         for url in route["urls"]:
             if url not in unescaped:
                 problems.append(f"Day {route['day']}: the day-route button must link exactly to {url}")
+    for name, url in (place_links or {}).items():
+        if url and url not in unescaped:
+            problems.append(f"{name}: add a \"📍 Google Maps\" link to exactly {url}")
     for stay in booking_search or []:
         if stay["url"] not in unescaped:
             problems.append(f"Stay {stay['city']} {stay['checkin']}–{stay['checkout']}: add the Booking.com search "

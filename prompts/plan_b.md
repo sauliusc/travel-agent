@@ -15,8 +15,10 @@ An alternative day must:
   daily driving limit as the main plan, lunch 13:00-14:00, paved roads only. Check each
   new driving leg with `python3 tools/route_check.py --from-lat .. --from-lon .. --to-lat ..
   --to-lon ..`, one at a time;
-- give every stop real coordinates, arrive/depart times and a Google Maps URL built from
-  the coordinates; notes in the trip's language, short and practical.
+- give every stop real coordinates, arrive/depart times and a `maps_query` (name + town +
+  country as Google Maps lists it; the street address if the name is ambiguous; empty only
+  for a spot with neither) -- Maps links are built by code, leave `google_maps_url` empty;
+  notes in the trip's language, short and practical.
 
 Write `weather_sensitive`, `title`, notes and `tip` for ordinary travellers in the trip's
 language -- no tool names or internal wording.
