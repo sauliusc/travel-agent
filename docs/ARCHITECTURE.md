@@ -327,7 +327,10 @@ Critic radinių (`target: itinerary`).
 - **Įrankiai:** `WebSearch`, `WebFetch`, `Bash` (patiekalų nuotraukos per Wikimedia).
   **Schema:** `FoodGuideDraft`. **Kodas:** prideda Google Maps nuorodas (pavadinimas + `address`, jei
   žinomas, kitaip miestas) ir patikrintas
-  patiekalų nuotraukas (→ `FoodGuide`). **Limitas:** 1200 s.
+  patiekalų nuotraukas (→ `FoodGuide`) — regioninių patiekalų ir kiekvienos užeigos `must_try`
+  (≥ 3 patiekalai su kaina; schema reikalauja `minItems: 3`), kiekvienas Commons failas
+  atsisiunčiamas vieną kartą; `must_try` be savo nuotraukos pasiima to paties regioninio
+  patiekalo nuotrauką. Užeiga turi ir `dinner_price_eur` (preliminari vakarienė asmeniui). **Limitas:** 1200 s.
 
 ### 4.10 Plan B — `agents/plan_b.py`
 
@@ -401,7 +404,8 @@ Critic radinių (`target: itinerary`).
 - **Kontekstas** (`page_context()`): `language`, `research` (praktinė informacija ir renginiai), `accommodation`, `stays` (Booking.com
   detalės ir nuotraukos), `itinerary`, `day_routes` (Google Maps dienos maršrutų URL),
   `logistics` (atkarpos be vidinių įrodymų + `traveler_tips`), `budget`, `images`,
-  `car_rental`, `food`, `forecast`, `plan_b`; `map_data` ir `packing` — tik nuoroda, kad
+  `car_rental`, `food`, `forecast`, `plan_b`, `nearby` (užeigos ir parduotuvės prie
+  nakvynių); `map_data` ir `packing` — tik nuoroda, kad
   vietą užima kodas (`<!-- TRIP_MAP -->`, `<!-- PACKING_LIST -->`).
 - **Užklausa — naujas puslapis (`design`):**
   ```
@@ -466,7 +470,8 @@ Critic radinių (`target: itinerary`).
   blocker|minor, where, problem, fix}]}`.
 - **Ciklas (iki 3 ratų):**
   1. `tools/page_checks.py` (kodas, nemokamai): nuotraukų keliai ∈ manifestas, dienų
-     maršrutų URL, kiekvienos stotelės / užeigos / baro Google Maps nuoroda,
+     maršrutų URL, kiekvienos stotelės / užeigos / baro / vietos prie nakvynės Google Maps
+     nuoroda, kiekvienas užeigos `must_try` patiekalas,
      `PACKING_LIST`/`TRIP_MAP` žymės, ranka rašyto žemėlapio nebuvimas,
      kiekvienas `traveler_tips` puslapyje. Radus — taisomas tik puslapis.
   2. Critic. Nėra `blocker` → baigta (`minor` naujo rato nekelia).
@@ -480,6 +485,8 @@ Critic radinių (`target: itinerary`).
 | `stay` — `tools/booking.py` | Booking.com nuorodos iš nakvynės plano (iki 8): naršyklės užklausa, nepavykus — headless Chromium (Playwright); JSON-LD/OpenGraph → pavadinimas, adresas, įvertinimas, visas aprašymas, patogumai; iki 5 nuotraukų į `image_cache/`. |
 | Booking.com paieška — `tools/booking_links.py` | Iš Nakvynės agento `picks` JSON bloko (miestas, vieta, datos, kaina) kiekvienai nakvynei sukuria Booking.com paieškos nuorodą su datomis ir žmonių skaičiumi (`booking_search` puslapio kontekste) ir patikrina kainos ribą (`max_price_per_night_eur`, vienas pakartojimas). |
 | `map_data` — `tools/map_html.py` | Leaflet žemėlapis iš itinerary: taškai su tooltip (pavadinimas), popup (diena, laikas, Maps), dienų spalvos ir maršrutai. |
+| `nearby` — `tools/nearby.py` | Prie kiekvienos nakvynės (paskutinė dienos stotelė, išskyrus paskutinę dieną; gretimos naktys toje pačioje vietoje sujungiamos): 5 artimiausios vietos pavalgyti ir 3 maisto parduotuvės iš OpenStreetMap (Overpass, 1 km, trūkstant — 3 km), atstumas (tiesė ×1,3) ir ėjimo laikas, Google Maps nuoroda. Nepavykus — tušti sąrašai su `error`. |
+| Nuotraukų stilius — `tools/photo_style.py` | Fiksuotas CSS (`spot-thumb` didelė per visą kortelę, `photo-grid`, `dish-grid` + `dish-thumb`) įterpiamas į `<head>` po kiekvieno puslapio generavimo, kad nuotraukų dydis nesikeistų tarp iteracijų. |
 | `forecast` — `tools/forecast.py` | Open-Meteo prognozė iki 16 d.; toliau arba be duomenų — 5 metų klimato vidurkis. |
 | nuotraukos — `tools/image_download.py` | Commons licencijų ir autorių patikra, atsisiuntimas. |
 | `day_routes` — `tools/maps_links.py` | Google Maps dienos maršruto URL, po vieną kiekvienai tos pačios transporto rūšies atkarpų sekai (`modes`: automobiliu / pėsčiomis / viešuoju transportu — transitas be tarpinių taškų, todėl kiekviena tokia atkarpa atskirai) — vietos pavadinimais (`maps_query`: pavadinimas + miestas, dviprasmiškai — adresas), be jo — koordinatės. Taip pat kiekvienos stotelės, užeigos ir baro Google Maps nuoroda. |

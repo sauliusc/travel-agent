@@ -392,7 +392,7 @@ def trip_stage_calls(trip_id: str, stage: str):
 
 
 # --- /agents: what each agent is and how it was actually invoked ----------
-# Stages that call an LLM agent (map_data, forecast, deploy_log are code),
+# Stages that call an LLM agent (map_data, nearby, forecast, deploy_log are code),
 # with the agents/ module implementing each.
 AGENT_MODULES = {
     "requirements": "requirements", "research": "research", "weather": "weather",

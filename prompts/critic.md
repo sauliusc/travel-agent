@@ -26,6 +26,10 @@ Check, in order:
    line and transit time, 🚗 only for driving), as in `logistics.legs`? A walk shown with a
    car time or as "važiavimas", or any car/driving/parking/rental content on a trip without a
    car (no `car` legs), is a `page` blocker.
+5c. Photos use the fixed classes (`spot-thumb`, `photo-grid`, `dish-grid` + `dish-thumb`)
+   without the page's own image-size CSS, and every eatery shows its dinner price and its
+   must-try dishes -- otherwise a `page` issue. (That each nearby place and dish is on the
+   page is checked by code before you.)
 6. Do Google Maps links point to the right place (a query naming a different or same-named
    place elsewhere is a `minor` issue)? Every stop, eatery and bar has its own Maps link.
    Each day with a route must have its day-route button(s) using exactly the given

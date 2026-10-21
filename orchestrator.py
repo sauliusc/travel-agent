@@ -50,6 +50,8 @@ from tools.maps_links import day_routes, with_place_urls
 from tools.packing_html import inject as inject_packing
 from tools.packing_html import to_template as _packing_template
 from tools.map_html import inject as inject_map, map_data
+from tools.nearby import nearby_for_stays
+from tools import photo_style
 from tools.booking import find_urls as find_booking_urls, stay_details
 from tools.booking_links import over_budget, picks, search_links, strip_picks
 from tools.map_html import to_template as _map_template
@@ -66,7 +68,7 @@ MAX_LOGISTICS_FIXES = 2
 def to_template(page_html: str) -> str | None:
     """Page with code-rendered blocks (packing list, map) back as placeholders."""
     t = _packing_template(page_html)
-    return None if t is None else _map_template(t)
+    return None if t is None else photo_style.strip(_map_template(t))
 
 
 def _booking_context(*texts: str | None) -> str | None:
@@ -107,6 +109,7 @@ STAGE_ORDER = [
     "itinerary",
     "logistics_report",
     "map_data",
+    "nearby",
     "images",
     "car_rental",
     "food",
@@ -138,6 +141,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "itinerary": ["requirements", "research", "weather", "accommodation"],
     "logistics_report": ["requirements", "itinerary"],
     "map_data": ["itinerary"],
+    "nearby": ["itinerary"],
     "images": ["itinerary"],
     "car_rental": ["requirements"],
     "food": ["requirements", "itinerary", "accommodation"],
@@ -147,7 +151,7 @@ STAGE_DEPS: dict[str, list[str]] = {
     "plan_b": ["requirements", "itinerary"],
     "packing": ["requirements", "itinerary", "forecast", "car_rental"],
     "budget": ["itinerary", "accommodation", "car_rental", "food"],
-    "page": ["requirements", "research", "accommodation", "stay", "itinerary", "logistics_report", "budget", "map_data", "images",
+    "page": ["requirements", "research", "accommodation", "stay", "itinerary", "logistics_report", "budget", "map_data", "nearby", "images",
              "car_rental", "food", "forecast", "plan_b", "packing"],
     "deploy_log": ["page", "images", "food"],
 }
@@ -166,12 +170,12 @@ STAGE_PROMPTS: dict[str, list[str]] = {
 # before such a stage existed can still be rerun from a later stage.
 MAX_STAYS = 8  # booking.com pages read per trip (each is a browser load)
 
-CODE_STAGES = {"stay", "map_data", "forecast"}
+CODE_STAGES = {"stay", "map_data", "nearby", "forecast"}
 
 STAGE_LABELS = {
     "requirements": "Reikalavimai", "research": "Tyrimas", "weather": "Oras/sezonas",
     "accommodation": "Nakvynė", "itinerary": "Dienų planas", "logistics_report": "Logistika",
-    "stay": "Apgyvendinimo detalės", "map_data": "Žemėlapis", "images": "Nuotraukos", "car_rental": "Auto nuoma",
+    "stay": "Apgyvendinimo detalės", "map_data": "Žemėlapis", "nearby": "Prie nakvynės", "images": "Nuotraukos", "car_rental": "Auto nuoma",
     "food": "Maistas ir barai", "forecast": "Orų prognozė", "plan_b": "Planas B",
     "packing": "Daiktai",
     "budget": "Biudžetas", "page": "Puslapis", "deploy_log": "Publikavimas",
@@ -417,6 +421,18 @@ def run_from_stage(
         progress("Žemėlapio duomenų ruošimas...")
         save("map_data", json.dumps(map_data(Itinerary.model_validate_json(out["itinerary"])), ensure_ascii=False))
 
+    if must_run("nearby"):
+        # Places to eat and food shops next to each overnight place, from
+        # OpenStreetMap, with distances computed by code -- no agent call.
+        progress("Užeigos ir parduotuvės prie nakvynės vietų...")
+        nearby = nearby_for_stays(Itinerary.model_validate_json(out["itinerary"]))
+        for place in nearby:
+            if place.get("error"):
+                progress(f"{place['name']}: žemėlapio duomenų gauti nepavyko ({place['error'][:120]}) -- "
+                         "vietų netoliese nebus; pakartok „↻ Prie nakvynės“ vėliau.")
+        save("nearby", json.dumps(nearby, ensure_ascii=False))
+    nearby = json.loads(out["nearby"])
+
     if must_run("images"):
         itin = Itinerary.model_validate_json(out["itinerary"])
         stop_names = {s.name for d in itin.days for s in d.stops}
@@ -484,7 +500,7 @@ def run_from_stage(
 
     # Stop photos and dish photos are shipped together.
     all_images = ImageResults(
-        images=[*images.images, *(d.image for d in food.dishes if d.image),
+        images=[*images.images, *food.images(),
                 *(FoundImage(**p) for st in stays for p in st.get("photos", []))],
         skipped=images.skipped,
     )
@@ -494,7 +510,7 @@ def run_from_stage(
         with log_calls("budget", on_llm_call):
             save("budget", run_budget({
                 "itinerary": out["itinerary"], "accommodation": accommodation,
-                "car_rental": car_rental.model_dump(), "food": food.model_dump(exclude={"dishes": {"__all__": {"image"}}}),
+                "car_rental": car_rental.model_dump(), "food": food.without_images(),
             }))
 
     # --- page, critic, deploy ----------------------------------------------
@@ -516,6 +532,8 @@ def run_from_stage(
             "logistics": _page_logistics(logistics_report),
             "budget": out["budget"],
             "map_data": "rendered by code -- only place the <!-- TRIP_MAP --> placeholder",
+            # Per overnight place: nearest places to eat and food shops (code, OpenStreetMap).
+            "nearby": nearby,
             "images": images.model_dump(),
             "car_rental": car_rental.model_dump(),
             "food": food.model_dump(),
@@ -529,7 +547,13 @@ def run_from_stage(
         itinerary = with_place_urls(Itinerary.model_validate_json(out["itinerary"]))
         links = {f"Day {d.number}, {s.name}": s.google_maps_url for d in itinerary.days for s in d.stops}
         links.update({p.name: p.maps_url for p in [*food.eateries, *food.bars]})
+        links.update({f"Near {st['name']}: {p['name']}": p["maps_url"]
+                      for st in nearby for p in [*st["eateries"], *st["shops"]]})
         return links
+
+    def must_show() -> list[tuple[str, str]]:
+        """Each eatery's must-try dishes, for check_page."""
+        return [(f"{e.name} (Kur pavalgyti, Ką paragauti čia)", m.name) for e in food.eateries for m in e.must_try]
 
     repo_name = _slugify(requirements)
 
@@ -547,7 +571,9 @@ def run_from_stage(
                                 "and map JS) with the single line <!-- TRIP_MAP --> -- the map is now rendered by code."]
             html = update_page(template, page_context(), "\n".join([*update_notes, f"Updated data: {labels}"]))
         html = inject_map(html, map_data(Itinerary.model_validate_json(out["itinerary"])))
-        return inject_packing(html, packing, f"packing:{repo_name}")
+        html = inject_packing(html, packing, f"packing:{repo_name}")
+        # Fixed photo sizes, whatever CSS the designer wrote this time.
+        return photo_style.inject(html)
 
     if must_run("page"):
         # A manual "↻ Puslapis" redesigns from scratch; any other rerun updates
@@ -564,7 +590,7 @@ def run_from_stage(
             code_problems = check_page(out["page"], {i.local_path for i in all_images.images},
                                        page_context()["day_routes"], logistics_report.traveler_tips,
                                        search_links(accommodation, requirements.travelers),
-                                       place_links())
+                                       place_links(), must_show())
             if code_problems:
                 progress(f"Puslapio patikra rado {len(code_problems)} netikslumų - taisomas tik puslapis...")
                 notes = "\n".join(f"- {p}" for p in code_problems)

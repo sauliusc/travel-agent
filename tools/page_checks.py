@@ -15,9 +15,12 @@ def _norm(text: str) -> str:
 
 
 def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], traveler_tips: list[str],
-               booking_search: list[dict] | None = None, place_links: dict[str, str] | None = None) -> list[str]:
-    """place_links: place name -> its Google Maps URL (stops, eateries, bars);
-    every one must be linked from the page."""
+               booking_search: list[dict] | None = None, place_links: dict[str, str] | None = None,
+               must_show: list[tuple[str, str]] | None = None) -> list[str]:
+    """place_links: place name -> its Google Maps URL (stops, eateries, bars,
+    places near the stays); every one must be linked from the page.
+    must_show: (where, text) pairs whose text must appear on the page, e.g.
+    each eatery's must-try dishes."""
     problems = []
     for src in sorted({s for s in _IMG_SRC.findall(page_html) if not s.startswith(("http:", "https:", "data:"))}):
         if src not in image_paths:
@@ -42,6 +45,9 @@ def check_page(page_html: str, image_paths: set[str], day_routes: list[dict], tr
     if "L.map(" in page_html.split("<!-- TRIP_MAP:START -->")[0] + page_html.split("<!-- TRIP_MAP:END -->")[-1]:
         problems.append("Remove the hand-written Leaflet map code -- the map is rendered by code at <!-- TRIP_MAP -->")
     text = _norm(page_html)
+    for where, item in must_show or []:
+        if _norm(item) not in text:
+            problems.append(f"{where}: show \"{item}\"")
     for tip in traveler_tips:
         if _norm(tip) not in text:
             problems.append(f"Missing traveller tip (show it word for word): {tip}")

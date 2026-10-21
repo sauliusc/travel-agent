@@ -13,6 +13,15 @@ from pydantic import BaseModel, Field
 from schemas.images import FoundImage
 
 
+class MustTryDraft(BaseModel):
+    name: str = Field(description="dish name in the trip's language")
+    local_name: str = Field(default="", description="as written on the local menu")
+    price_eur: int = Field(description="typical price of this dish at this place")
+    commons_filename: str = Field(
+        description="Wikimedia Commons file title of a photo of this dish, without 'File:'; "
+        "empty string if none found")
+
+
 class EateryDraft(BaseModel):
     name: str
     city: str
@@ -23,6 +32,10 @@ class EateryDraft(BaseModel):
     kind: str = Field(description="e.g. 'šeimos taverna', 'byrektorė', 'turgus'")
     local_cuisine: bool = Field(description="true for places serving traditional local food")
     avg_price_eur: int = Field(description="typical price per person for a main dish + drink")
+    dinner_price_eur: int = Field(description="preliminary dinner price per person: a starter or salad, "
+                                  "a main dish and a drink")
+    must_try: list[MustTryDraft] = Field(min_length=3, description="at least 3 dishes worth trying here, "
+                                         "the place's signature or local dishes first")
     why: str = Field(description="one sentence for travellers, in the trip's language")
 
 
@@ -54,8 +67,14 @@ class FoodGuideDraft(BaseModel):
     bars: list[BarDraft] = Field(description="only genuinely special bars; empty list is fine")
 
 
+class MustTry(MustTryDraft):
+    image: FoundImage | None = None
+
+
 class Eatery(EateryDraft):
     maps_url: str
+    must_try: list[MustTry] = Field(default_factory=list)
+    dinner_price_eur: int | None = None  # absent in guides saved before it existed
 
 
 class Dish(DishDraft):
@@ -70,3 +89,13 @@ class FoodGuide(BaseModel):
     eateries: list[Eatery]
     dishes: list[Dish]
     bars: list[Bar] = Field(default_factory=list)
+
+    def images(self) -> list[FoundImage]:
+        """Every verified dish photo (regional dishes + eateries' must-try), once each."""
+        found = [d.image for d in self.dishes if d.image]
+        found += [m.image for e in self.eateries for m in e.must_try if m.image]
+        return list({i.local_path: i for i in found}.values())
+
+    def without_images(self) -> dict:
+        return self.model_dump(exclude={"dishes": {"__all__": {"image"}},
+                                        "eateries": {"__all__": {"must_try": {"__all__": {"image"}}}}})

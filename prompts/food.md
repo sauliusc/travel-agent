@@ -8,6 +8,13 @@ trip's language.
    tourist or international restaurants. Budget-friendly: give a typical price per person.
    Cover lunch on each day and dinner in each overnight place. Prefer places with
    good recent reviews; don't include closed or tourist-trap places.
+   For every eatery: `dinner_price_eur` -- a preliminary dinner price per person (starter or
+   salad + main + drink, from its menu or recent reviews), and `must_try` -- at least 3
+   dishes worth ordering there (its signature and local dishes first; from the menu or
+   reviews), each with a typical price and a Wikimedia Commons photo of that dish
+   (`python3 tools/wikimedia.py --query "<dish>"`, file title without `File:` in
+   `commons_filename`; the same file may be used for the same dish at several places; empty
+   string if nothing fitting and openly licensed exists).
 2. `dishes` -- 5-8 dishes typical of this region: local name, short description, typical
    price range, and which of your `eateries` serve it (`where_to_try`, exact names). For a
    photo, find a Wikimedia Commons image of the dish with

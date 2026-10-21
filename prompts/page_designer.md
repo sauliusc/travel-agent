@@ -34,6 +34,11 @@ Everything you receive has already been checked (routes validated, images verifi
   For each entry in `booking_search`, the matching stay's card (same city and dates) gets a
   button "🔎 Booking.com: {checkin}–{checkout}, {N} žm." linking to its `url` exactly as given,
   `target="_blank"` -- it opens the search with the dates and group already filled in.
+  Each stay's card also shows what's around it, from `nearby` (match by `nights` = the
+  itinerary days the travellers sleep there, or the name/city): "🍽 Netoliese pavalgyti" --
+  all `eateries` (name, kind/cuisine in plain words, distance as "350 m · ~5 min pėsčiomis",
+  a "📍 Google Maps" link to `maps_url`), and "🛒 Parduotuvės" -- all `shops` the same way.
+  Leave out a list that is empty.
 - Day-by-day sections: times, stops, how to get to each stop, stop notes. Each leg from
   `logistics.legs` is shown with its `icon` exactly as given (🚗 car, 🚶 walk, 🚇/🚌/🚋/🚆...
   public transport), `distance_km` and `minutes` -- the time in that leg's own mode, never
@@ -54,6 +59,14 @@ Everything you receive has already been checked (routes validated, images verifi
 - Photos: use only entries in `images.images`, by their exact `local_path`. Under each,
   a small credit: author, license, link to `source_url`. A stop with no image has no photo.
   Lightbox: pure CSS + JS, click `.spot-thumb` to open fullscreen, no library.
+- Photo markup is fixed -- photo sizes are set by code-injected CSS, the same on every run,
+  so write no CSS of your own for image width/height/aspect/size:
+  - a place photo: `<img class="spot-thumb" ...>` directly in the stop's card (shown large,
+    full card width);
+  - several photos together (accommodation gallery): `<div class="photo-grid">` holding the
+    `<img class="spot-thumb">` tags;
+  - dish photos: `<div class="dish-grid">` of `<figure>`s, each `<img class="spot-thumb
+    dish-thumb">` + `<figcaption>` (dish name, price; credit small).
 - Budget summary from `budget`, if present.
 - "ℹ️ Praktinė informacija" section from the "Practical information" in `research`:
   documents, money and cards, tipping, local customs, safety, the emergency number, public
@@ -79,7 +92,9 @@ Everything you receive has already been checked (routes validated, images verifi
   name, rating with review count and source, car class, estimated total price, the `why`
   sentence, pickup place, a booking link -- plus `car_rental.tips`.
 - "Kur pavalgyti" section: `food.eateries` grouped by day, each with what it's near, kind,
-  typical price per person, the `why` sentence and a "📍 Google Maps" link (`maps_url`
+  typical price per person, "Vakarienė ~{dinner_price_eur} € asmeniui", the `why` sentence,
+  "Ką paragauti čia" -- every `must_try` dish as a `.dish-grid` tile (photo `image.local_path`
+  if present with author + license + source credit, name, local name, price) and a "📍 Google Maps" link (`maps_url`
   exactly as given). Wherever an eatery or bar is mentioned (also in a day's section), it
   links to its `maps_url`. Also
   mention the relevant eatery in that day's section (lunch/dinner).
