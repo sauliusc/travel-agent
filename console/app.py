@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from agents import providers
 from console import config, db
 from tools import run_history
-from orchestrator import CODE_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
+from orchestrator import CHANGES_KEY, CODE_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
 
 app = FastAPI(title="Travel planning console")
 
@@ -144,6 +144,12 @@ def _run_pipeline(
         profile_name = profile["name"] if profile else None
         if profile and profile["id"] != db.BASE_PROFILE:
             log(f"Agentų rinkinys: {profile['name']}")
+        if cached_outputs and CHANGES_KEY not in cached_outputs:
+            legacy = _changes_from_events(trip_id)
+            if legacy:
+                cached_outputs = {**cached_outputs, CHANGES_KEY: json.dumps(legacy, ensure_ascii=False)}
+                db.save_stage_output(trip_id, CHANGES_KEY, cached_outputs[CHANGES_KEY])
+                log(f"Atkurta ankstesnių pataisymų: {len(legacy)} -- jie bus taikomi perleidžiant žingsnius.")
         with providers.using_profile(profile_id):
             url = run_from_stage(
                 stage_name,
@@ -172,6 +178,18 @@ def _run_pipeline(
         save_history(_trip_page_url(trip_id), "failed", str(e))
     finally:
         queue.put_nowait(None)  # sentinel: stream ends
+
+
+def _changes_from_events(trip_id: str) -> list[str]:
+    """Change requests of a trip made before they were stored (CHANGES_KEY):
+    recovered from its event log, oldest first, each once."""
+    prefix = "Taikomas pataisymas: "
+    found: list[str] = []
+    for e in db.get_events(trip_id):
+        msg = e["message"]
+        if msg.startswith(prefix) and msg[len(prefix):] not in found:
+            found.append(msg[len(prefix):])
+    return found
 
 
 def _trip_page_url(trip_id: str) -> str | None:

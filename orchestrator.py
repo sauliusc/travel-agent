@@ -183,6 +183,31 @@ STAGE_LABELS = {
 
 FP_PREFIX = "_fp:"
 
+# Every change request ("Pataisyti") applied to the trip, oldest first, stored
+# with the stage outputs. A later rerun of any stage ("↻ Nakvynė", "↻ Dienų
+# planas", ...) builds from the original request PLUS these, so a regenerated
+# step never falls back to what the traveller already changed (e.g. the old
+# place to stay from the original request).
+CHANGES_KEY = "_changes"
+
+
+def with_changes(user_requirements: str | None, history: list[str]) -> str:
+    """The original request followed by the traveller's later changes."""
+    text = user_requirements or ""
+    if history:
+        text += ("\n\nLater changes by the traveller (applied in this order; they override the "
+                 "original request and earlier changes):\n" + "\n".join(f"- {h}" for h in history))
+    return text
+
+
+def _latest_booking_text(user_requirements: str | None, history: list[str]) -> str | None:
+    """The newest text naming a booked property: the last change with a
+    booking.com link, else the original request."""
+    for text in reversed(history):
+        if find_booking_urls(text):
+            return text
+    return user_requirements
+
 
 def _only_stops(itinerary: Itinerary, names: set[str]) -> Itinerary:
     """The itinerary reduced to the given stops (days without any dropped)."""
@@ -237,10 +262,20 @@ def run_from_stage(
     forced = {stage_name}
     if modification is not None:
         forced |= {"accommodation", "itinerary"} & set(STAGE_ORDER[start_idx:])
+    history: list[str] = json.loads(out.get(CHANGES_KEY) or "[]")
+    if modification is not None and modification not in history:
+        history.append(modification)
+    # The request as it stands now: original + every change so far.
+    request = with_changes(user_requirements, history)
+    changes_note = ("\ntraveller_changes (later changes by the traveller, oldest first; they override "
+                    "the original request -- e.g. a place to stay named here replaces the one in the "
+                    "original request)=" + json.dumps(history, ensure_ascii=False)) if history else ""
     extra = {
-        "requirements": user_requirements or "",
-        "car_rental": user_requirements or "",
-        "packing": user_requirements or "",
+        "requirements": request,
+        "car_rental": request,
+        "packing": request,
+        "accommodation": changes_note,
+        "itinerary": changes_note,
     }
 
     def fingerprint(stage: str) -> str:
@@ -281,13 +316,17 @@ def run_from_stage(
         out[FP_PREFIX + stage] = fp
         stage_done(FP_PREFIX + stage, fp)
 
+    if history and out.get(CHANGES_KEY) != json.dumps(history, ensure_ascii=False):
+        out[CHANGES_KEY] = json.dumps(history, ensure_ascii=False)
+        stage_done(CHANGES_KEY, out[CHANGES_KEY])
+
     # --- requirements, research, weather -----------------------------------
     if must_run("requirements"):
         if user_requirements is None:
             raise ValueError("user_requirements is required to (re)run the requirements stage")
         progress("Reikalavimų analizė...")
         with log_calls("requirements", on_llm_call):
-            save("requirements", run_requirements_analyst(user_requirements).model_dump_json())
+            save("requirements", run_requirements_analyst(request).model_dump_json())
     requirements_json = out["requirements"]
     requirements = TripRequirements.model_validate_json(requirements_json)
 
@@ -314,8 +353,8 @@ def run_from_stage(
         else:
             progress("Nakvynės paieška...")
             with log_calls("accommodation", on_llm_call):
-                booked = _booking_context(user_requirements)
-                task = (f"requirements={requirements_json}\nresearch={out['research']}"
+                booked = _booking_context(_latest_booking_text(user_requirements, history))
+                task = (f"requirements={requirements_json}\nresearch={out['research']}{changes_note}"
                         + (f"\nbooked_property (read from the traveller's booking.com link; keep this place "
                            f"and its link)={booked}" if booked else ""))
                 plan_text = run_accommodation(task)
@@ -337,7 +376,8 @@ def run_from_stage(
     # few photos for the page -- for every booking.com link in the
     # accommodation plan (one per night/city), else in the original request.
     if must_run("stay"):
-        urls = (find_booking_urls(accommodation) or find_booking_urls(user_requirements or ""))[:MAX_STAYS]
+        urls = (find_booking_urls(accommodation)
+                or find_booking_urls(_latest_booking_text(user_requirements, history) or ""))[:MAX_STAYS]
         stays = []
         for i, url in enumerate(urls, 1):
             progress(f"Apgyvendinimo detalės ir nuotraukos iš Booking.com ({i}/{len(urls)})...")
@@ -369,7 +409,7 @@ def run_from_stage(
             with log_calls("itinerary", on_llm_call):
                 save("itinerary", plan(
                     f"requirements={requirements_json}\nresearch={out['research']}\n"
-                    f"weather={out['weather']}\naccommodation={accommodation}"
+                    f"weather={out['weather']}\naccommodation={accommodation}{changes_note}"
                 ))
 
     def validate_until_ok(itinerary: str, previous: LogisticsReport | None) -> LogisticsReport:
@@ -465,7 +505,7 @@ def run_from_stage(
     if must_run("car_rental"):
         progress("Automobilio nuomos pasiūlymai...")
         with log_calls("car_rental", on_llm_call):
-            result = run_car_rental(requirements_json, user_requirements or "")
+            result = run_car_rental(requirements_json, request)
         if not result.needed:
             progress("Automobilio nuoma šiai kelionei nereikalinga -- praleidžiama.")
         save("car_rental", result.model_dump_json())
@@ -494,7 +534,7 @@ def run_from_stage(
     if must_run("packing"):
         progress("Daiktų sąrašas...")
         with log_calls("packing", on_llm_call):
-            save("packing", run_packing(requirements_json, user_requirements or "", out["itinerary"],
+            save("packing", run_packing(requirements_json, request, out["itinerary"],
                                         out["forecast"], car_rental.needed).model_dump_json())
     packing = PackingList.model_validate_json(out["packing"])
 

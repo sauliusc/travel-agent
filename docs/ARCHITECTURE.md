@@ -501,6 +501,13 @@ Critic radinių (`target: itinerary`).
 - **„Pataisyti“:** pradedama nuo `accommodation` su pataisymo tekstu → Accommodation
   `update` → Itinerary `fix` → toliau pagal atspaudus; puslapis atnaujinamas, ne kuriamas iš
   naujo.
+- **Pataisymų istorija (`_changes`):** kiekvienas pataisymas išsaugomas su kelionės žingsnių
+  rezultatais. Perleidžiant bet kurį žingsnį, užklausa = pradinis tekstas + visi pataisymai
+  (`with_changes`): Requirements, Car Rental, Packing ją gauna visą, Accommodation ir
+  Itinerary (naujas planas) — `traveller_changes` sąrašą, o užsakyta vieta (`booked_property`,
+  `stay`) imama iš naujausio teksto su Booking.com nuoroda. Taip „↻ Nakvynė“ negrąžina senos
+  vietos iš pradinės užklausos. Senoms kelionėms istorija atkuriama iš įvykių žurnalo
+  („Taikomas pataisymas: …“).
 - **„Bandyti dar kartą“:** tęsia **tą pačią** kelionę nuo žingsnio po paskutinio baigto
   (`_resume`); nepritaikytas pataisymas pritaikomas iš naujo, jau pritaikytas perduodamas
   puslapio atnaujinimui.
