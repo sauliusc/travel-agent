@@ -1,0 +1,6 @@
+:80 {
+    basicauth {
+        __CONSOLE_BASIC_AUTH_USER__ __CONSOLE_BASIC_AUTH_HASH__
+    }
+    reverse_proxy 127.0.0.1:8000
+}

@@ -26,8 +26,8 @@ Vartotojas → Orchestrator → [Requirements, Research, Logistics Validator, Ac
 
 ```
 travel-agent/
-├── agents/         # kiekvieno agento modulis (run_agent() kvietimai)
-├── tools/          # @beta_tool funkcijos (OSRM, Overpass, Wikimedia, GitHub API)
+├── agents/         # kiekvieno agento modulis (run_agent() -> claude -p subprocess)
+├── tools/          # CLI scenarijai (OSRM, Overpass, Wikimedia, Open-Meteo) + GitHub API
 ├── schemas/        # Pydantic modeliai agentų JSON išvestims
 ├── prompts/        # system prompt .md failai kiekvienam agentui
 ├── templates/       # Page Designer HTML/workflow šablonai
@@ -44,15 +44,28 @@ implementuojamas atskirame PR (`claude/*` šakos, automatiškai sujungiamos į `
 
 ## Setup
 
+### Proxmox LXC (vienas komandos paleidimas)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sauliusc/travel-agent/main/scripts/install.sh | bash
+```
+
+Įdiegia viską (sistema, Python, venv, **Claude Code CLI**, systemd servisą, Caddy),
+palaidžia `claude auth login` (prenumeratos prisijungimas — claude.ai Pro/Max, **ne**
+API raktas), paklausia likusių credential'ų (GitHub, konsolės slaptažodis) ir juos saugo
+vienoje vietoje — `/etc/travel-agent/credentials.env` (600). Pilnos instrukcijos:
+`docs/PROXMOX_SETUP.md`.
+
+### Lokalus vystymas
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Anthropic prieiga (rekomenduojama)
-ant auth login
-
-# GitHub prieiga CI/CD Agentui
-export GITHUB_TOKEN="github_pat_..."
+claude auth login       # prenumeratos prisijungimas (claude.ai Pro/Max)
+cp .env.example .env    # užpildyti GITHUB_TOKEN ir kt. — console/config.py nuskaito automatiškai
 ```
 
-Pilnos diegimo instrukcijos (įskaitant Proxmox LXC): `docs/PROXMOX_SETUP.md`.
+Agentai veikia per `claude -p` (Claude Code CLI, žr. `agents/base.py`) — ne Anthropic API
+raktu, tad `.env` nebereikia jokio Anthropic lauko. Visi reikalingi credential'ai ir jų
+paskirtis aprašyti `.env.example`.

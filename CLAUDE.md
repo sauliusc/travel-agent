@@ -2,6 +2,9 @@
 
 Šis projektas implementuoja agentinę kelionių planavimo sistemą, aprašytą
 [dizaino dokumente](https://claude.ai/code/artifact/147e64cc-db43-43dd-a08c-263438c75677).
+Dabartinė architektūra, kiekvieno agento kontekstas ir siunčiama užklausa —
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Keičiant agento įvestį, užklausą ar įrankius,
+atnaujinti ir šį dokumentą.
 
 ## Kontekstas
 
@@ -14,16 +17,32 @@ standartiniam nuomotam automobiliui, o pirminis planas to nepastebėjo.
 
 14 agentų, aprašyti dizaino dokumente: Orchestrator, Requirements Analyst, Research,
 Logistics Validator, Accommodation, Itinerary Planner, Map, Image, Page Designer, Budget,
-Weather/Season, Review/Critic, Documentation, CI/CD.
+Weather/Season, Review/Critic, Documentation, CI/CD. Papildomai: Car Rental (3 gerai
+vertinamos nuomos įmonės, jei nuomojamas automobilis) ir Food & Bars (pigios vietinės
+užeigos prie maršruto, regiono patiekalai su kaina ir nuotrauka, ypatingi barai), Orų
+prognozė (kodas, Open-Meteo: prognozė iki 16 d., toliau – daugiametis vidurkis) ir Packing
+Planner (daiktų sąrašas; checkbox'ai su localStorage generuojami kodu), Plan B (alternatyva
+blogam orui; kodas tikrina tą pačią pradžią/pabaigą, kelius ir vairavimo limitą).
 
 ## Technologijos
 
-- **Python 3.10+**, `anthropic` SDK 1.x, `client.beta.messages.tool_runner()` su `@beta_tool`
-- Modelis: `claude-opus-5`, `thinking: {"type": "adaptive"}`
-- Nemokami išoriniai API: OSRM (važiavimo laikai), Overpass (kelio tipas), Wikimedia Commons
-  (nuotraukos), Open-Meteo (oras); Anthropic `web_search`/`web_fetch` server tools tyrimui
-- Strukūruotos agentų tarpusavio išvestys per Pydantic + `output_config.format`
+- **Python 3.10+**. Agentai veikia per **Claude Code CLI** (`claude -p`, headless/print
+  mode) subprocess kvietimais (`agents/base.py`), autentifikacija — **prenumeratos**
+  `claude auth login` (claude.ai Pro/Max), **ne** API raktas. Priežastis: atskira
+  `claude-agent-sdk` biblioteka aiškiai reikalauja API rakto ir draudžia prenumeratos
+  autentifikaciją trečiųjų šalių produktams — bet `claude -p` yra oficialus, palaikomas
+  Claude Code būdas prenumeratoriui automatizuoti savo asmeninį naudojimą (skiriasi nuo
+  Agent SDK).
+- Custom "įrankiai" (`tools/osrm.py`, `overpass.py`, `wikimedia.py`, `open_meteo.py`) yra
+  paprasti CLI scenarijai (`argparse` + `__main__`), kuriuos agentas kviečia per Claude
+  Code įmontuotą **Bash** įrankį — ne per Python-side tool-registration API.
+  `tools/github.py` — išimtis, kviečiamas tiesiogiai iš `agents/cicd.py` (deterministinis
+  GitHub API darbas, ne LLM sprendimas).
+- Strukūruotos išvestys (pvz. `TripRequirements`) per `claude -p --json-schema` + Pydantic
+  validacija (`agents/requirements.py`) — pakeičia Anthropic Messages API
+  `client.messages.parse()`, kuris nebeprieinamas be API rakto.
 - Valdymo konsolė: FastAPI + HTMX + SQLite, skirta paleisti iš vienos vietos (žr. `console/`)
+- `console/config.py` paleidimo metu tikrina `claude auth status --json` (ne API raktą)
 
 ## Darbo eiga
 
@@ -31,8 +50,22 @@ Kiekvienas komponentas (žr. GitHub Issues) implementuojamas atskiroje `claude/*
 pateikiamas kaip atskiras PR. `.github/workflows/auto-merge.yml` automatiškai sujungia
 `claude/*` šakų PR į `main` (squash).
 
+- PR, kuris įgyvendina issue, aprašyme turi `Closes #N` — sujungus issue užsidaro automatiškai.
+  Jei issue įgyvendintas kitaip (be tokio PR), uždaryti jį ranka su komentaru.
+- Sujungus PR šaka ištrinama automatiškai (`auto-merge.yml`), o `branch-cleanup.yml` po kiekvieno
+  push į `main` ištrina likusias baigtas `claude/*` šakas. Rankiniu būdu šakų netrinti.
+
 ## Testavimas
 
 Kiekvienas `tools/*.py` modulis turėtų turėti paprastą smoke testą (tiesioginis HTTP
 kvietimas realiam API, ne mock) — šie API yra nemokami ir be rate limit problemų testavimo
 apimtimi.
+
+## Diegimas (CT110)
+
+Po kiekvieno sujungto PR naudotojui visada nurodyti šią atnaujinimo komandą (ne `git pull` +
+`systemctl restart` atskirai):
+
+```bash
+cd /opt/travel-agent && bash scripts/update.sh
+```

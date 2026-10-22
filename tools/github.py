@@ -1,0 +1,104 @@
+"""GitHub REST API helpers for the CI/CD agent: create a repo, push files,
+enable Pages.
+
+Requires a fine-grained personal access token with Contents, Pull requests,
+Workflows, and Pages read/write permissions, passed via the GITHUB_TOKEN
+environment variable (see docs/PROXMOX_SETUP.md).
+"""
+
+import base64
+import os
+
+import httpx
+
+API_URL = "https://api.github.com"
+
+
+def _headers() -> dict:
+    token = os.environ["GITHUB_TOKEN"]
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def create_repo(name: str, description: str = "", private: bool = False) -> str:
+    """Create a new GitHub repository under the authenticated user's account.
+
+    Args:
+        name: repository name, e.g. "albania-3days-trip-v2"
+        description: short repository description
+        private: whether the repo should be private (default False) -- GitHub
+            Pages requires a public repo unless the account is on GitHub
+            Enterprise, and every trip repo this pipeline creates is meant
+            to be published via Pages (see agents/cicd.py's enable_pages
+            call), so private repos would silently fail to serve the page.
+    """
+    resp = httpx.post(
+        f"{API_URL}/user/repos",
+        headers=_headers(),
+        json={"name": name, "description": description, "private": private, "auto_init": True},
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        return f"Failed to create repo '{name}': {resp.status_code} {resp.text}"
+    data = resp.json()
+    return f"Created {data['full_name']} at {data['html_url']}"
+
+
+def push_file(owner: str, repo: str, path: str, content: str | bytes, message: str, branch: str = "main") -> str:
+    """Create or update a single file in a repository via the Contents API.
+
+    Args:
+        owner: repository owner
+        repo: repository name
+        path: file path within the repo, e.g. "index.html"
+        content: full file content (text, or bytes for binary files like images)
+        message: commit message
+        branch: target branch (default "main")
+    """
+    raw = content.encode("utf-8") if isinstance(content, str) else content
+    encoded = base64.b64encode(raw).decode("ascii")
+
+    # Look up the existing file's SHA (needed to update, not needed to create).
+    get_resp = httpx.get(
+        f"{API_URL}/repos/{owner}/{repo}/contents/{path}",
+        headers=_headers(),
+        params={"ref": branch},
+        timeout=30,
+    )
+    sha = get_resp.json().get("sha") if get_resp.status_code == 200 else None
+
+    payload = {"message": message, "content": encoded, "branch": branch}
+    if sha:
+        payload["sha"] = sha
+
+    put_resp = httpx.put(
+        f"{API_URL}/repos/{owner}/{repo}/contents/{path}",
+        headers=_headers(),
+        json=payload,
+        timeout=30,
+    )
+    if put_resp.status_code >= 400:
+        return f"Failed to push {path}: {put_resp.status_code} {put_resp.text}"
+    return f"Pushed {path} to {owner}/{repo}@{branch}"
+
+
+def enable_pages(owner: str, repo: str) -> str:
+    """Enable GitHub Pages for a repository, sourced from GitHub Actions.
+
+    Args:
+        owner: repository owner
+        repo: repository name
+    """
+    resp = httpx.post(
+        f"{API_URL}/repos/{owner}/{repo}/pages",
+        headers=_headers(),
+        json={"build_type": "workflow"},
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        return f"Failed to enable Pages: {resp.status_code} {resp.text}"
+    return f"Pages enabled for {owner}/{repo}: https://{owner}.github.io/{repo}/"
+

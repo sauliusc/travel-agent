@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kelionių planuotojas</title>
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1e2229; --border: #2a2f3a;
+    --text: #e6e8eb; --text-dim: #9aa1ad; --accent: #3a8c7c; --accent-2: #7ad0be;
+    --err: #e6807a; --err-bg: rgba(224,92,92,0.14); --ok: #5fc491; --warn: #e0b25a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden;
+  }
+
+  #sidebar { width: 320px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  #sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+  #sidebar-header h1 { font-size: 16px; margin: 0 0 12px; font-weight: 600; }
+  #new-trip-btn { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  #manage-bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
+  #manage-bar .link-btn { padding: 0; }
+  #manage-tools { display: none; padding: 8px 16px; border-bottom: 1px solid var(--border); gap: 6px; flex-wrap: wrap; }
+  body.managing #manage-tools { display: flex; }
+  #manage-tools .btn { font-size: 12px; padding: 5px 10px; }
+  .trip-item { position: relative; }
+  .trip-select { display: none; position: absolute; top: 12px; left: 10px; width: 16px; height: 16px; accent-color: var(--err); pointer-events: none; }
+  body.managing .trip-select { display: block; }
+  body.managing .trip-item { padding-left: 36px; }
+  body.managing .trip-item.selected { border-color: var(--err); background: var(--err-bg); }
+  body.managing .trip-item[data-status=running], body.managing .trip-item[data-status=queued] { opacity: .5; cursor: not-allowed; }
+  .btn.danger-solid { background: #b84a44; border-color: #b84a44; color: #fff; }
+  .btn.danger-solid:disabled { opacity: .4; cursor: not-allowed; }
+  dialog#confirm { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 20px; max-width: 440px; width: calc(100% - 32px); }
+  dialog#confirm::backdrop { background: rgba(0,0,0,.6); }
+  dialog#confirm h3 { margin: 0 0 8px; font-size: 16px; }
+  dialog#confirm p { margin: 0 0 8px; font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  dialog#confirm ul { margin: 0 0 12px; padding-left: 18px; font-size: 13px; max-height: 160px; overflow-y: auto; }
+  dialog#confirm .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  #settings-btn { position: fixed; top: 12px; right: 16px; z-index: 20; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim); font-size: 19px; text-decoration: none; }
+  #settings-btn:hover { color: var(--text); border-color: var(--accent); }
+  /* keep the sticky trip bar's actions clear of the settings button */
+  #detail-bar { padding-right: 52px !important; }
+  #new-trip-btn:hover { background: var(--accent-2); }
+
+  #trip-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .empty-list { padding: 16px; color: var(--text-dim); font-size: 13px; }
+  .trip-item { padding: 12px; border-radius: 8px; margin-bottom: 6px; cursor: pointer; border: 1px solid transparent; }
+  .trip-item:hover { background: var(--panel-2); }
+  .trip-item.active { background: var(--panel-2); border-color: var(--accent); }
+  .trip-item .title { font-size: 13px; line-height: 1.4; color: var(--text); margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .trip-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+  .badge.queued { background: rgba(154,161,173,0.15); color: var(--text-dim); }
+  .badge.running { background: rgba(224,178,90,0.15); color: var(--warn); }
+  .badge.done { background: rgba(95,196,145,0.15); color: var(--ok); }
+  .badge.failed { background: var(--err-bg); color: var(--err); }
+  .trip-time { font-size: 11px; color: var(--text-dim); }
+
+  /* One scroll container for the whole trip view: nested fixed-height panes
+     (request text, call log, progress log) each had their own scrollbar and
+     left almost no room for any of them. */
+  #main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; min-width: 0; }
+  #empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 14px; }
+
+  #composer { flex: 1; overflow-y: auto; padding: 32px 24px; }
+  #composer .inner { max-width: 640px; margin: 0 auto; }
+  #composer h2 { margin-top: 0; }
+  #composer p { color: var(--text-dim); font-size: 14px; }
+  textarea { width: 100%; min-height: 160px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 14px; font-family: inherit; resize: vertical; }
+  .profile-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--text-dim); flex-wrap: wrap; }
+  .profile-row select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  .profile-row input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  .hint-link { color: var(--accent-2); font-size: 12px; text-decoration: none; }
+  .profile-tag { font-size: 11px; color: #8ab4f8; border: 1px solid rgba(138,180,248,.4); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  button.primary { margin-top: 12px; padding: 10px 22px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.primary:hover { background: var(--accent-2); }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #detail { padding: 0 24px 32px; max-width: 1100px; width: 100%; margin: 0 auto; }
+  #detail-bar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 14px 0 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #detail-bar .status { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+  #detail-current { font-size: 13px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #detail-current.error { color: var(--err); }
+  .card { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+  .card > h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; display: flex; justify-content: space-between; align-items: center; }
+  .req-text { font-size: 14px; color: var(--text); white-space: pre-wrap; line-height: 1.55; }
+  .req-text.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .link-btn { background: none; border: none; color: var(--accent-2); cursor: pointer; font-size: 13px; padding: 6px 0 0; }
+  .action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 13px; cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.danger:hover { border-color: var(--err); color: var(--err); }
+  .btn.link { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.link:hover { background: var(--accent-2); border-color: var(--accent-2); }
+
+  #detail-page-link { margin: 16px 0 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; background: rgba(58,140,124,0.12); font-size: 14px; }
+  #detail-page-link a { color: var(--accent-2); font-weight: 600; word-break: break-all; }
+  #detail-page-link .hint { display: block; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+
+  .stages-panel .stages-label { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .stage-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stage-chip { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim); font-size: 12px; cursor: pointer; }
+  .stage-chip:hover { border-color: var(--accent); color: var(--text); }
+  .stage-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .modify-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .modify-box .modify-label { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .modify-row { display: flex; gap: 8px; }
+  .modify-row input[type=text] { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 13px; font-family: inherit; }
+  .modify-row button { flex-shrink: 0; }
+
+
+  .calllog-empty { color: var(--text-dim); font-size: 13px; padding: 8px 0; }
+  .stage-list { display: flex; flex-direction: column; gap: 6px; }
+  details.stage-item { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+  details.stage-item > summary { list-style: none; cursor: pointer; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+  details.stage-item > summary::-webkit-details-marker { display: none; }
+  details.stage-item > summary::before { content: '▸'; color: var(--text-dim); margin-right: 8px; display: inline-block; transition: transform 0.15s; }
+  details.stage-item[open] > summary::before { transform: rotate(90deg); }
+  .stage-name { font-weight: 600; flex: 1; }
+  .stage-count { color: var(--text-dim); font-size: 11px; }
+  .stage-calls { padding: 4px 12px 12px; }
+  .call-item { border-top: 1px solid var(--border); padding: 10px 0; }
+  .call-item:first-child { border-top: none; }
+  .call-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  details.call-block { margin-top: 4px; }
+  details.call-block > summary { cursor: pointer; font-size: 12px; color: var(--text-dim); padding: 2px 0; }
+  details.call-block > summary:hover { color: var(--text); }
+  details.call-block pre {
+    margin: 6px 0 0; padding: 10px; background: #0b0d11; border-radius: 6px; border: 1px solid var(--border);
+    max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--text);
+  }
+
+  #log { padding: 12px 14px; border-radius: 8px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; line-height: 1.7; background: #0b0d11; }
+  #log.collapsed .log-line:not(:nth-last-child(-n+8)) { display: none; }
+  .log-line { padding: 2px 0; white-space: pre-wrap; word-break: break-word; }
+  .log-line.error { color: var(--err); }
+  .log-line.ok-final { color: var(--ok); font-weight: 600; }
+
+  [hidden] { display: none !important; }
+
+  #back-btn { display: none; }
+
+  /* Phones: one naturally scrolling page instead of nested fixed-height
+     scroll panes (which trapped touch scrolling above the progress log).
+     With a trip or the composer open, the trip list is replaced by a
+     "back" button so the detail starts at the top of the screen. */
+  @media (max-width: 700px) {
+    body { display: block; height: auto; min-height: 100vh; overflow: visible; }
+    #sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+    #trip-list { max-height: 55vh; }
+    body.pane-open #sidebar { display: none; }
+    #main { display: block; overflow: visible; }
+    #detail { padding: 0 16px 24px; }
+    #back-btn { display: block; margin: 12px 16px 0; }
+    #empty-state { padding: 32px 16px; }
+    #composer { padding: 16px; }
+    #detail-bar .status { flex-basis: 100%; }
+    .card { padding: 12px; }
+    #log { padding: 10px 12px; font-size: 12px; }
+    .btn { padding: 10px 14px; }
+    .stage-chip { padding: 8px 12px; }
+    .modify-row { flex-direction: column; }
+    details.call-block pre { max-height: 50vh; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <h1>🧭 Kelionių planuotojas</h1>
+      <button id="new-trip-btn" onclick="showComposer()">+ Nauja kelionė</button>
+    </div>
+    <div id="manage-bar">
+      <span>Kelionės</span>
+      <button class="link-btn" id="manage-toggle" onclick="toggleManage()">Tvarkyti</button>
+    </div>
+    <div id="manage-tools">
+      <button class="btn" onclick="selectOlder(30)">Senesnės nei 30 d.</button>
+      <button class="btn" onclick="selectAll(true)">Visos</button>
+      <button class="btn" onclick="selectAll(false)">Nieko</button>
+      <button class="btn danger-solid" id="bulk-delete" disabled onclick="bulkDelete()">Ištrinti (0)</button>
+    </div>
+    <div id="trip-list" hx-get="/trips/list" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
+  </aside>
+
+  <a id="settings-btn" href="/settings" title="Nustatymai" aria-label="Nustatymai">⚙️</a>
+  <main id="main">
+    <button id="back-btn" class="btn" onclick="closePane()">← Visos kelionės</button>
+    <div id="empty-state">Pasirink kelionę kairėje arba pradėk naują.</div>
+
+    <div id="composer" hidden>
+      <div class="inner">
+        <h2>Nauja kelionė</h2>
+        <p>Įklijuok kelionės reikalavimus laisvu tekstu — datas, kryptį, keliautojų skaičių, prioritetus.</p>
+        <textarea id="requirements-input" placeholder="Albanija, 3 dienos, spalio 2-4, 2 žmonės, automobilis, gamtos objektai..."></textarea>
+        <div class="profile-row" title="Neprivaloma -- tą patį galima parašyti ir tekste">
+          <span>🏠 Nakvynė:</span>
+          <select id="stay-type"><option value="">bet koks tipas</option><option>apartamentai</option>
+            <option>viešbutis</option><option>svečių namai</option><option>hostelis</option></select>
+          <input id="stay-max" type="number" min="1" step="1" placeholder="maks. €/naktį" style="width:120px">
+          <select id="stay-area"><option value="">bet kur</option><option>centre</option>
+            <option>prie viešojo transporto</option><option>ramioje vietoje</option></select>
+        </div>
+        <div class="profile-row">
+          <label for="profile-select">Agentų rinkinys:</label>
+          <select id="profile-select"><option value="1">Base</option></select>
+          <a href="/settings#agents" class="hint-link">tvarkyti</a>
+        </div>
+        <button class="primary" id="submit-btn" onclick="submitTrip()">Planuoti</button>
+      </div>
+    </div>
+
+    <div id="detail" hidden>
+      <div id="detail-bar">
+        <div class="status">
+          <span id="detail-badge" class="badge"></span>
+          <span id="detail-profile" class="profile-tag" hidden></span>
+          <span id="detail-current"></span>
+        </div>
+        <span id="detail-time" class="trip-time"></span>
+        <div class="action-row" id="detail-actions"></div>
+      </div>
+      <div id="detail-page-link" hidden></div>
+      <section class="card">
+        <h3>Užklausa</h3>
+        <div id="detail-req" class="req-text clamped"></div>
+        <button id="req-toggle" class="link-btn" onclick="toggleReq()" hidden>Rodyti visą ▾</button>
+      </section>
+      <section class="card" id="detail-controls" hidden>
+        <h3>Perleisti / pataisyti</h3>
+        <div id="detail-stages"></div>
+        <div id="detail-modify"></div>
+      </section>
+      <section class="card">
+        <h3>Eiga <button id="log-toggle" class="link-btn" onclick="toggleLog()" hidden></button></h3>
+        <div id="log" class="collapsed"></div>
+      </section>
+      <section class="card">
+        <h3>Agentų užklausos ir atsakymai</h3>
+        <div id="detail-calllog"></div>
+      </section>
+    </div>
+  </main>
+
+<dialog id="confirm">
+  <h3 id="confirm-title"></h3>
+  <p id="confirm-text"></p>
+  <ul id="confirm-list"></ul>
+  <p>Bus ištrinta visa istorija: eiga, žingsnių rezultatai ir agentų užklausos. Šio veiksmo atšaukti negalima. GitHub puslapis ir repozitorija lieka.</p>
+  <div class="row">
+    <button class="btn" value="cancel" onclick="this.closest('dialog').close('cancel')">Atšaukti</button>
+    <button class="btn danger-solid" onclick="this.closest('dialog').close('ok')">Ištrinti</button>
+  </div>
+</dialog>
+<script>
+const STATUS_LABELS = { queued: 'Laukia', running: 'Vykdoma', done: 'Baigta', failed: 'Nepavyko' };
+const STAGE_LABELS = {
+  requirements: 'Reikalavimai', research: 'Tyrimas', weather: 'Oras/sezonas',
+  accommodation: 'Nakvynė', stay: 'Apgyvendinimo detalės', itinerary: 'Dienų planas', logistics_report: 'Logistika',
+  map_data: 'Žemėlapis', nearby: 'Prie nakvynės', images: 'Nuotraukos', car_rental: 'Auto nuoma', food: 'Maistas ir barai',
+  forecast: 'Orų prognozė', plan_b: 'Planas B', packing: 'Daiktai',
+  budget: 'Biudžetas', critic: 'Peržiūra',
+  page: 'Puslapis', deploy_log: 'Publikavimas',
+};
+let currentTripId = null;
+let currentEventSource = null;
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  return iso.replace('T', ' ').slice(0, 16);
+}
+
+function markActiveInSidebar() {
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.tripId === currentTripId);
+  });
+}
+// Re-apply the active highlight after every HTMX-driven sidebar refresh,
+// since /trips/list is a stateless fragment that doesn't know which trip
+// the viewer currently has open.
+document.body.addEventListener('htmx:afterSwap', (e) => {
+  if (e.detail.target && e.detail.target.id === 'trip-list') { markActiveInSidebar(); syncSelection(); }
+});
+
+const isPhone = () => window.matchMedia('(max-width: 700px)').matches;
+
+function openPane() {
+  document.body.classList.add('pane-open');
+  if (isPhone()) window.scrollTo(0, 0);
+}
+
+function closePane() {
+  currentTripId = null;
+  if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+  document.body.classList.remove('pane-open');
+  document.getElementById('composer').hidden = true;
+  document.getElementById('detail').hidden = true;
+  document.getElementById('empty-state').hidden = false;
+  markActiveInSidebar();
+  window.scrollTo(0, 0);
+}
+
+function showComposer() {
+  openPane();
+  currentTripId = null;
+  if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+  document.getElementById('empty-state').hidden = true;
+  document.getElementById('detail').hidden = true;
+  document.getElementById('composer').hidden = false;
+  document.getElementById('requirements-input').value = '';
+  loadProfiles();
+  document.getElementById('requirements-input').focus();
+  markActiveInSidebar();
+}
+
+// Agent sets (⚙️ Nustatymai → Agentai); the last one used is preselected.
+async function loadProfiles() {
+  const sel = document.getElementById('profile-select');
+  try {
+    const { profiles, base_id } = await (await fetch('/api/profiles')).json();
+    let last = null;
+    try { last = Number(localStorage.getItem('tripProfile')); } catch (e) {}
+    const chosen = profiles.some(p => p.id === last) ? last : base_id;
+    sel.innerHTML = profiles.map(p =>
+      `<option value="${p.id}" ${p.id === chosen ? 'selected' : ''}>${p.name.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}${p.id === base_id ? ' (base)' : ''}</option>`).join('');
+  } catch (e) { /* keep the Base option */ }
+  sel.onchange = () => { try { localStorage.setItem('tripProfile', sel.value); } catch (e) {} };
+}
+
+async function submitTrip() {
+  const input = document.getElementById('requirements-input');
+  let text = input.value.trim();
+  if (!text) return;
+  // Accommodation preferences from the form are appended to the request text,
+  // so the Requirements agent reads them like anything else the traveller wrote.
+  const prefs = [];
+  const type = document.getElementById('stay-type').value;
+  const max = document.getElementById('stay-max').value;
+  const area = document.getElementById('stay-area').value;
+  if (type) prefs.push(`tipas: ${type}`);
+  if (max) prefs.push(`ne brangiau kaip ${max} € už naktį visai grupei`);
+  if (area) prefs.push(`vieta: ${area}`);
+  if (prefs.length) text += `\n\nApgyvendinimo pageidavimai: ${prefs.join('; ')}.`;
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Siunčiama...';
+  try {
+    const res = await fetch('/trips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'requirements_text=' + encodeURIComponent(text)
+        + '&profile_id=' + encodeURIComponent(document.getElementById('profile-select').value),
+    });
+    const { trip_id } = await res.json();
+    htmx.ajax('GET', '/trips/list', '#trip-list');
+    openTrip(trip_id);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Planuoti';
+  }
+}
+
+async function openTrip(tripId) {
+  openPane();
+  currentTripId = tripId;
+  if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+
+  document.getElementById('empty-state').hidden = true;
+  document.getElementById('composer').hidden = true;
+  document.getElementById('detail').hidden = false;
+  markActiveInSidebar();
+
+  const res = await fetch('/trips/' + tripId);
+  if (!res.ok) { showComposer(); return; }
+  const trip = await res.json();
+
+  renderDetailHeader(trip);
+  const logEl = document.getElementById('log');
+  logEl.innerHTML = '';
+  document.getElementById('detail-current').textContent = '';
+  trip.events.forEach(ev => appendLogLine(ev.message, ev.level));
+
+  if (trip.status === 'running' || trip.status === 'queued') {
+    streamLive(tripId);
+  }
+}
+
+function renderDetailHeader(trip) {
+  const badge = document.getElementById('detail-badge');
+  badge.className = 'badge ' + trip.status;
+  badge.textContent = STATUS_LABELS[trip.status] || trip.status;
+  const tag = document.getElementById('detail-profile');
+  const prof = trip.profile;
+  tag.hidden = !prof || prof.id === 1;
+  tag.textContent = prof ? '🤖 ' + prof.name : '';
+  tag.title = 'Agentų rinkinys';
+  document.getElementById('detail-time').textContent =
+    fmtTime(trip.created_at) + (trip.finished_at ? ' → ' + fmtTime(trip.finished_at) : '');
+  const req = document.getElementById('detail-req');
+  if (req.textContent !== trip.requirements_text) {
+    req.textContent = trip.requirements_text;
+    req.classList.add('clamped');
+    document.getElementById('req-toggle').textContent = 'Rodyti visą ▾';
+  }
+  // Toggle only when the text is actually cut off.
+  requestAnimationFrame(() => {
+    document.getElementById('req-toggle').hidden =
+      req.classList.contains('clamped') && req.scrollHeight <= req.clientHeight + 2;
+  });
+  renderPageLink(trip);
+
+  const actions = document.getElementById('detail-actions');
+  let out = '';
+  if (trip.status === 'failed') {
+    out += `<button class="btn" onclick="retryTrip('${trip.id}')">↻ Bandyti dar kartą</button>`;
+  }
+  out += `<button class="btn danger" onclick="deleteTrip('${trip.id}')">🗑 Ištrinti</button>`;
+  actions.innerHTML = out;
+
+  renderStagePanel(trip);
+  renderModifyBox(trip);
+  document.getElementById('detail-controls').hidden = !(trip.completed_stages || []).length;
+  syncCallLogPanel(trip);
+}
+
+// Renders one collapsible item per pipeline stage that has made at least
+// one real `claude -p` call (trip.call_stages, a superset of
+// completed_stages that also includes "critic"). Expanding an item lazy-
+// loads that stage's full query+response history from
+// /trips/{id}/stages/{stage}/calls -- the point being that watching a
+// trip run should never require grepping `ps aux`/journalctl on the host.
+// Incremental (not a full rebuild) so re-syncing during a live run doesn't
+// collapse an item the viewer has open or discard an already-loaded one
+// unless its call count actually changed.
+function syncCallLogPanel(trip) {
+  const panel = document.getElementById('detail-calllog');
+  const stages = trip.call_stages || [];
+  if (!stages.length) {
+    if (!panel.querySelector('.stage-list')) {
+      panel.innerHTML = '<div class="calllog-empty">Dar nėra užklausų šiai kelionei.</div>';
+    }
+    return;
+  }
+  let list = panel.querySelector('.stage-list');
+  if (!list) {
+    panel.innerHTML = '';
+    list = document.createElement('div');
+    list.className = 'stage-list';
+    panel.appendChild(list);
+  }
+  stages.forEach(({ stage, count }) => {
+    let item = list.querySelector(`details[data-stage="${CSS.escape(stage)}"]`);
+    if (!item) {
+      item = document.createElement('details');
+      item.className = 'stage-item';
+      item.dataset.stage = stage;
+      item.dataset.tripId = trip.id;
+      item.dataset.loaded = 'false';
+      item.dataset.count = '0';
+      const summary = document.createElement('summary');
+      item.appendChild(summary);
+      const body = document.createElement('div');
+      body.className = 'stage-calls';
+      body.textContent = 'Spausk, kad peržiūrėtum užklausas ir atsakymus...';
+      item.appendChild(body);
+      item.addEventListener('toggle', () => { if (item.open) loadStageCalls(item); });
+      list.appendChild(item);
+    }
+    const summary = item.querySelector('summary');
+    summary.innerHTML = `<span class="stage-name">${STAGE_LABELS[stage] || stage}</span>`
+      + `<span class="stage-count">${count} ${count === 1 ? 'užklausa' : 'užklausos'}</span>`;
+    if (String(count) !== item.dataset.count) {
+      item.dataset.count = String(count);
+      item.dataset.loaded = 'false';
+      if (item.open) loadStageCalls(item);
+    }
+  });
+}
+
+async function loadStageCalls(item) {
+  if (item.dataset.loaded === 'true') return;
+  item.dataset.loaded = 'true';
+  const body = item.querySelector('.stage-calls');
+  body.textContent = 'Kraunama...';
+  const tripId = item.dataset.tripId;
+  const stage = item.dataset.stage;
+  let calls;
+  try {
+    const res = await fetch('/trips/' + tripId + '/stages/' + encodeURIComponent(stage) + '/calls');
+    calls = await res.json();
+  } catch (e) {
+    body.textContent = 'Nepavyko įkelti: ' + e;
+    item.dataset.loaded = 'false';
+    return;
+  }
+  body.innerHTML = '';
+  if (!calls.length) {
+    body.textContent = 'Šiam žingsniui dar nėra užklausų.';
+    return;
+  }
+  calls.forEach((call, i) => {
+    const entry = document.createElement('div');
+    entry.className = 'call-item';
+
+    const meta = document.createElement('div');
+    meta.className = 'call-meta';
+    meta.textContent = `#${i + 1} · ${fmtTime(call.created_at)}`;
+    entry.appendChild(meta);
+
+    const q = document.createElement('details');
+    q.className = 'call-block';
+    const qs = document.createElement('summary');
+    qs.textContent = 'Užklausa (query)';
+    const qpre = document.createElement('pre');
+    qpre.textContent = call.query;
+    q.appendChild(qs);
+    q.appendChild(qpre);
+    entry.appendChild(q);
+
+    const r = document.createElement('details');
+    r.className = 'call-block';
+    r.open = true;
+    const rs = document.createElement('summary');
+    rs.textContent = 'Atsakymas (response)';
+    const rpre = document.createElement('pre');
+    rpre.textContent = call.response;
+    r.appendChild(rs);
+    r.appendChild(rpre);
+    entry.appendChild(r);
+
+    body.appendChild(entry);
+  });
+}
+
+// Link to the published trip page, shown under the original request once
+// the page has been pushed to GitHub. Kept visible during a rerun (same URL,
+// it gets overwritten when the rerun finishes).
+function renderPageLink(trip) {
+  const box = document.getElementById('detail-page-link');
+  const url = trip.page_url;
+  if (!url || !/^https:\/\//.test(url)) { box.hidden = true; box.textContent = ''; return; }
+  box.textContent = '🌐 Kelionės puslapis: ';
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = url;
+  box.appendChild(a);
+  const hint = document.createElement('span');
+  hint.className = 'hint';
+  hint.textContent = trip.status === 'done'
+    ? 'Po paskelbimo GitHub Pages atsinaujina per ~1–2 min.'
+    : 'Vykdomas perleidimas — puslapis bus atnaujintas, kai jis baigsis.';
+  box.appendChild(hint);
+  box.hidden = false;
+}
+
+function renderStagePanel(trip) {
+  const panel = document.getElementById('detail-stages');
+  const stages = trip.completed_stages || [];
+  const busy = trip.status === 'running' || trip.status === 'queued';
+  if (!stages.length) { panel.innerHTML = ''; return; }
+  const chips = stages.map(s =>
+    `<button class="stage-chip" ${busy ? 'disabled' : ''} onclick="rerunFromStage('${trip.id}', '${s}')" `
+    + `title="Perleisti pipeline nuo šio žingsnio, naudojant išsaugotus ankstesnių žingsnių rezultatus">`
+    + `↻ ${STAGE_LABELS[s] || s}</button>`
+  ).join('');
+  panel.innerHTML = `<div class="stages-panel"><div class="stages-label">Nuo žingsnio (ankstesni paimami iš atminties):</div>`
+    + `<div class="stage-chips">${chips}</div></div>`;
+}
+
+function renderModifyBox(trip) {
+  const box = document.getElementById('detail-modify');
+  const stages = trip.completed_stages || [];
+  const busy = trip.status === 'running' || trip.status === 'queued';
+  if (!stages.includes('itinerary')) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="modify-box"><div class="modify-label">Pataisyti kelionę (laisvas tekstas):</div>`
+    + `<div class="modify-row">`
+    + `<input type="text" id="modify-input" placeholder="pvz. pridėti papildomą pajūrio dieną" ${busy ? 'disabled' : ''}>`
+    + `<button class="btn" ${busy ? 'disabled' : ''} onclick="modifyTrip('${trip.id}')">Pataisyti</button>`
+    + `</div></div>`;
+}
+
+function toggleReq() {
+  const req = document.getElementById('detail-req');
+  const clamped = req.classList.toggle('clamped');
+  document.getElementById('req-toggle').textContent = clamped ? 'Rodyti visą ▾' : 'Suskleisti ▴';
+}
+
+// The progress log shows its last 8 lines; the full history on request.
+function syncLogToggle() {
+  const logEl = document.getElementById('log');
+  const n = logEl.children.length;
+  const btn = document.getElementById('log-toggle');
+  btn.hidden = n <= 8;
+  btn.textContent = logEl.classList.contains('collapsed') ? `Rodyti visą (${n}) ▾` : 'Tik paskutiniai ▴';
+}
+
+function toggleLog() {
+  document.getElementById('log').classList.toggle('collapsed');
+  syncLogToggle();
+}
+
+function appendLogLine(message, level) {
+  const logEl = document.getElementById('log');
+  const div = document.createElement('div');
+  const isError = level === 'error';
+  div.className = 'log-line' + (isError ? ' error' : '') + (message === 'Baigta.' ? ' ok-final' : '');
+  div.textContent = message;
+  logEl.appendChild(div);
+  // Latest step stays visible in the sticky bar wherever the page is scrolled.
+  const cur = document.getElementById('detail-current');
+  cur.textContent = message;
+  cur.title = message;
+  cur.classList.toggle('error', isError);
+  syncLogToggle();
+}
+
+function streamLive(tripId) {
+  const es = new EventSource('/trips/' + tripId + '/events');
+  currentEventSource = es;
+  es.onmessage = (e) => {
+    const isError = e.data.startsWith('Klaida:') || e.data.startsWith('Nepavyko:');
+    appendLogLine(e.data, isError ? 'error' : 'info');
+    if (e.data === 'Baigta.' || isError) {
+      fetch('/trips/' + tripId).then(r => r.json()).then(renderDetailHeader);
+      htmx.ajax('GET', '/trips/list', '#trip-list');
+    } else if (tripId === currentTripId) {
+      // Each progress line means a stage just started or finished -- refresh
+      // the collapsible stage list (call counts, newly appeared stages) so
+      // it reflects the run live, not only once it's done/failed.
+      fetch('/trips/' + tripId).then(r => r.json()).then(syncCallLogPanel);
+    }
+  };
+  es.onerror = () => { es.close(); if (currentEventSource === es) currentEventSource = null; };
+}
+
+async function retryTrip(tripId) {
+  const res = await fetch('/trips/' + tripId + '/retry', { method: 'POST' });
+  if (!res.ok) return;
+  const { trip_id } = await res.json();
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  openTrip(trip_id);
+}
+
+async function rerunFromStage(tripId, stage) {
+  const res = await fetch('/trips/' + tripId + '/rerun-from/' + encodeURIComponent(stage), { method: 'POST' });
+  if (!res.ok) { appendLogLine('Nepavyko paleisti iš naujo: ' + (await res.text()), 'error'); return; }
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  openTrip(tripId);
+}
+
+async function modifyTrip(tripId) {
+  const input = document.getElementById('modify-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const res = await fetch('/trips/' + tripId + '/modify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'modification=' + encodeURIComponent(text),
+  });
+  if (!res.ok) { appendLogLine('Nepavyko pataisyti: ' + (await res.text()), 'error'); return; }
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  openTrip(tripId);
+}
+
+// Confirmation dialog: resolves true only on an explicit "Ištrinti".
+function confirmDelete(title, text, items) {
+  const dlg = document.getElementById('confirm');
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-text').textContent = text;
+  const list = document.getElementById('confirm-list');
+  list.innerHTML = '';
+  items.slice(0, 20).forEach(t => { const li = document.createElement('li'); li.textContent = t; list.appendChild(li); });
+  if (items.length > 20) { const li = document.createElement('li'); li.textContent = `... ir dar ${items.length - 20}`; list.appendChild(li); }
+  list.hidden = !items.length;
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.querySelector('.btn').focus();  // default focus on "Atšaukti"
+  return new Promise(res => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok'), { once: true }));
+}
+
+const tripTitle = id => (document.querySelector(`.trip-item[data-trip-id="${CSS.escape(id)}"] .title`) || {}).textContent || id;
+
+async function deleteTrip(tripId) {
+  if (!await confirmDelete('Ištrinti kelionę?', 'Bus ištrinta ši kelionė:', [tripTitle(tripId)])) return;
+  await fetch('/trips/' + tripId, { method: 'DELETE' });
+  selected.delete(tripId);
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  if (currentTripId === tripId) closePane();
+}
+
+// --- bulk delete ("Tvarkyti" mode) ---
+// Selection lives here, not in the DOM: the list is re-rendered every 5 s.
+const selected = new Set();
+const deletable = el => !['running', 'queued'].includes(el.dataset.status);
+
+function toggleManage() {
+  const on = document.body.classList.toggle('managing');
+  document.getElementById('manage-toggle').textContent = on ? 'Baigti' : 'Tvarkyti';
+  if (!on) selected.clear();
+  syncSelection();
+}
+
+function tripClick(ev, tripId) {
+  if (!document.body.classList.contains('managing')) { openTrip(tripId); return; }
+  const el = ev.currentTarget;
+  if (!deletable(el)) return;
+  selected.has(tripId) ? selected.delete(tripId) : selected.add(tripId);
+  syncSelection();
+}
+
+function syncSelection() {
+  const present = new Set();
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    const id = el.dataset.tripId;
+    present.add(id);
+    if (!deletable(el)) selected.delete(id);
+    const on = selected.has(id);
+    el.classList.toggle('selected', on);
+    el.querySelector('.trip-select').checked = on;
+  });
+  [...selected].forEach(id => { if (!present.has(id)) selected.delete(id); });
+  const btn = document.getElementById('bulk-delete');
+  btn.textContent = `Ištrinti (${selected.size})`;
+  btn.disabled = !selected.size;
+}
+
+function selectAll(on) {
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    if (on && deletable(el)) selected.add(el.dataset.tripId);
+  });
+  if (!on) selected.clear();
+  syncSelection();
+}
+
+function selectOlder(days) {
+  const cutoff = Date.now() - days * 86400000;
+  document.querySelectorAll('#trip-list .trip-item').forEach(el => {
+    const t = Date.parse((el.dataset.created || '').replace(' ', 'T') + 'Z');
+    if (deletable(el) && t && t < cutoff) selected.add(el.dataset.tripId);
+  });
+  syncSelection();
+}
+
+async function bulkDelete() {
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (!await confirmDelete(`Ištrinti ${ids.length} kelion${ids.length === 1 ? 'ę' : 'es'}?`,
+                           'Bus ištrintos šios kelionės:', ids.map(tripTitle))) return;
+  const res = await fetch('/trips/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+  const out = await res.json();
+  selected.clear();
+  if (out.deleted.includes(currentTripId)) closePane();
+  htmx.ajax('GET', '/trips/list', '#trip-list');
+  if (out.skipped.length) alert(`${out.skipped.length} vykdomos kelionės neištrintos.`);
+}
+// /agents links to a trip as /#<trip id>.
+if (location.hash.length > 1) openTrip(decodeURIComponent(location.hash.slice(1)));
+</script>
+</body>
+</html>
