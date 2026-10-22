@@ -17,6 +17,7 @@ Anthropic-SDK-based version.
 import contextvars
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -159,6 +160,20 @@ class ClaudeCLIError(RuntimeError):
     """Raised when the claude CLI exits non-zero or returns malformed output."""
 
 
+class UsageLimitError(ClaudeCLIError):
+    """The subscription's session/usage limit (HTTP 429). Retrying before the
+    limit resets only fails again, so this is never retried automatically."""
+
+
+_LIMIT = re.compile(r"api_error_status=429|\bHTTP 429\b|\b429\b.*(limit|too many)|session limit|usage limit|"
+                    r"rate[ _-]?limit", re.I)
+
+
+def is_usage_limit(error: BaseException | str) -> bool:
+    """True for a 429 / usage-limit failure (claude CLI or an external provider)."""
+    return isinstance(error, UsageLimitError) or bool(_LIMIT.search(str(error)))
+
+
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
@@ -289,7 +304,8 @@ def _invoke_claude(
     if result.returncode != 0:
         err_text = _failure_summary(result.stdout, result.stderr)
         _record(f"ERROR: claude exited {result.returncode}: {err_text}")
-        raise ClaudeCLIError(f"claude exited {result.returncode}: {err_text}")
+        error = UsageLimitError if is_usage_limit(err_text) else ClaudeCLIError
+        raise error(f"claude exited {result.returncode}: {err_text}")
 
     try:
         payload = json.loads(result.stdout)

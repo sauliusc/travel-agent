@@ -510,7 +510,12 @@ Critic radinių (`target: itinerary`).
   („Taikomas pataisymas: …“).
 - **„Bandyti dar kartą“:** tęsia **tą pačią** kelionę nuo žingsnio po paskutinio baigto
   (`_resume`); nepritaikytas pataisymas pritaikomas iš naujo, jau pritaikytas perduodamas
-  puslapio atnaujinimui.
+  puslapio atnaujinimui. Puslapio patikros/peržiūros ciklo eiga saugoma po kiekvieno
+  žingsnio (`_page_review`: bandymas, jau rasti pataisymai, dar nepritaikyti pataisymai),
+  todėl nutrūkus jis tęsiamas — puslapis nekuriamas iš naujo, atlikta peržiūra nekartojama.
+- **Automatinis kartojimas:** nepavykus paleidimui, konsolė iki 5 kartų kas 1 min. tęsia nuo
+  tos pačios vietos (kaip „Bandyti dar kartą“). Nekartojama: naudojimo limitas (429,
+  `UsageLimitError` / `is_usage_limit`), `LogisticsBlocked`, `ValueError`.
 - **„↻ Puslapis“:** puslapis kuriamas iš naujo (naujas dizainas).
 
 ### Užklausų istorija kelionės repozitorijoje

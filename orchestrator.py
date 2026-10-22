@@ -190,6 +190,13 @@ FP_PREFIX = "_fp:"
 # place to stay from the original request).
 CHANGES_KEY = "_changes"
 
+# Progress of the page check/review/fix loop, stored after every step:
+# {"attempt", "fixed", "notes"} -- `notes` are findings not yet applied to the
+# stored page (None: the stored page still has to be checked). A failed run
+# resumed at "page" continues from here instead of redesigning the page and
+# repeating reviews it already paid for. Empty once the loop is finished.
+PAGE_REVIEW_KEY = "_page_review"
+
 
 def with_changes(user_requirements: str | None, history: list[str]) -> str:
     """The original request followed by the traveller's later changes."""
@@ -228,6 +235,7 @@ def run_from_stage(
     modification: str | None = None,
     user_requirements: str | None = None,
     change_notes: list[str] | None = None,
+    resume: bool = False,
 ) -> str:
     """Run the pipeline from `stage_name` to CI/CD deploy and return the
     published page's URL.
@@ -251,6 +259,8 @@ def run_from_stage(
             accommodation (if it concerns lodging) and the itinerary, both of
             which are then rerun; use stage_name="accommodation".
         user_requirements: the original free-text trip request
+        resume: continuing a failed run ("Bandyti dar kartą" / automatic
+            retry): an unfinished page review loop continues where it stopped
     """
     if stage_name not in STAGE_ORDER:
         raise ValueError(f"Unknown stage {stage_name!r}, must be one of {STAGE_ORDER}")
@@ -615,50 +625,71 @@ def run_from_stage(
         # Fixed photo sizes, whatever CSS the designer wrote this time.
         return photo_style.inject(html)
 
+    def save_review(state: dict | None) -> None:
+        out[PAGE_REVIEW_KEY] = json.dumps(state, ensure_ascii=False) if state else ""
+        stage_done(PAGE_REVIEW_KEY, out[PAGE_REVIEW_KEY])
+
     if must_run("page"):
-        # A manual "↻ Puslapis" redesigns from scratch; any other rerun updates
-        # the existing page so the trip page doesn't change look on every tweak.
-        full = "page" in forced or to_template(out.get("page", "")) is None
-        progress("Puslapio generavimas..." if full else "Puslapio atnaujinimas (dizainas išlaikomas)...")
-        with log_calls("page", on_llm_call):
-            save("page", design_page(None if full else changes))
+        state = json.loads(out.get(PAGE_REVIEW_KEY) or "null") if resume and "page" in out else None
+        if state:
+            progress(f"Puslapis jau sugeneruotas -- tęsiama jo patikra ir taisymas "
+                     f"(bandymas {state['attempt'] + 1}/{MAX_FIX_ITERATIONS}).")
+        else:
+            # A manual "↻ Puslapis" redesigns from scratch; any other rerun updates
+            # the existing page so the trip page doesn't change look on every tweak.
+            full = "page" in forced or to_template(out.get("page", "")) is None
+            progress("Puslapio generavimas..." if full else "Puslapio atnaujinimas (dizainas išlaikomas)...")
+            with log_calls("page", on_llm_call):
+                save("page", design_page(None if full else changes))
+            state = {"attempt": 0, "fixed": [], "notes": None}
+            save_review(state)
         # Code checks first (free), then the critic. Page-only findings update
         # the page alone; only itinerary blockers rework the plan + logistics.
         # Minor findings never start a round -- they ride along with the next update.
-        fixed: list[str] = []
-        for attempt in range(MAX_FIX_ITERATIONS):
-            code_problems = check_page(out["page"], {i.local_path for i in all_images.images},
-                                       page_context()["day_routes"], logistics_report.traveler_tips,
-                                       search_links(accommodation, requirements.travelers),
-                                       place_links(), must_show())
-            if code_problems:
-                progress(f"Puslapio patikra rado {len(code_problems)} netikslumų - taisomas tik puslapis...")
-                notes = "\n".join(f"- {p}" for p in code_problems)
-            else:
-                progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
-                with log_calls("critic", on_llm_call):
-                    result = review(out["page"], out["itinerary"], logistics_report.model_dump_json(),
-                                    all_images.model_dump_json(),
-                                    json.dumps(page_context()["day_routes"], ensure_ascii=False),
-                                    "\n".join(fixed))
-                if not result.blockers():
-                    if result.issues:
-                        progress(f"Peržiūra: {len(result.issues)} smulkių pastabų, puslapis tinkamas.")
-                    break
-                notes = issues_text(result.issues)
-                fixed.append(notes)
-                itinerary_issues = [i for i in result.blockers() if i.target == "itinerary"]
-                if itinerary_issues:
-                    progress("Taisomas dienų planas pagal peržiūrą...")
-                    with log_calls("itinerary", on_llm_call):
-                        new_itinerary, summary = fix(out["itinerary"], issues_text(itinerary_issues))
-                    save("itinerary", new_itinerary)
-                    logistics_report = validate_until_ok(out["itinerary"], logistics_report)
-                    notes += f"\nItinerary: {summary}"
+        # Every step is saved, so a failure resumes here (see PAGE_REVIEW_KEY).
+        fixed: list[str] = state["fixed"]
+        while state["attempt"] < MAX_FIX_ITERATIONS:
+            attempt, notes = state["attempt"], state["notes"]
+            if notes is None:
+                code_problems = check_page(out["page"], {i.local_path for i in all_images.images},
+                                           page_context()["day_routes"], logistics_report.traveler_tips,
+                                           search_links(accommodation, requirements.travelers),
+                                           place_links(), must_show())
+                if code_problems:
+                    progress(f"Puslapio patikra rado {len(code_problems)} netikslumų - taisomas tik puslapis...")
+                    notes = "\n".join(f"- {p}" for p in code_problems)
                 else:
-                    progress("Taisomas tik puslapis pagal peržiūrą...")
+                    progress(f"Peržiūra (bandymas {attempt + 1}/{MAX_FIX_ITERATIONS})...")
+                    with log_calls("critic", on_llm_call):
+                        result = review(out["page"], out["itinerary"], logistics_report.model_dump_json(),
+                                        all_images.model_dump_json(),
+                                        json.dumps(page_context()["day_routes"], ensure_ascii=False),
+                                        "\n".join(fixed))
+                    if not result.blockers():
+                        if result.issues:
+                            progress(f"Peržiūra: {len(result.issues)} smulkių pastabų, puslapis tinkamas.")
+                        break
+                    notes = issues_text(result.issues)
+                    fixed.append(notes)
+                    itinerary_issues = [i for i in result.blockers() if i.target == "itinerary"]
+                    if itinerary_issues:
+                        progress("Taisomas dienų planas pagal peržiūrą...")
+                        with log_calls("itinerary", on_llm_call):
+                            new_itinerary, summary = fix(out["itinerary"], issues_text(itinerary_issues))
+                        save("itinerary", new_itinerary)
+                        logistics_report = validate_until_ok(out["itinerary"], logistics_report)
+                        notes += f"\nItinerary: {summary}"
+                    else:
+                        progress("Taisomas tik puslapis pagal peržiūrą...")
+                state = {"attempt": attempt, "fixed": fixed, "notes": notes}
+                save_review(state)
+            else:
+                progress("Taikomi jau rasti puslapio pataisymai...")
             with log_calls("page", on_llm_call):
                 save("page", design_page([f"Fix these review findings:\n{notes}"]))
+            state = {"attempt": attempt + 1, "fixed": fixed, "notes": None}
+            save_review(state)
+        save_review(None)
 
     owner = os.environ.get("GITHUB_OWNER", "sauliusc")
     if must_run("deploy_log"):

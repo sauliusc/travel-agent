@@ -9,6 +9,7 @@ import json
 import re
 import html
 import logging
+import time
 import uuid
 from pathlib import Path
 
@@ -17,9 +18,11 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sse_starlette.sse import EventSourceResponse
 
 from agents import providers
+from agents.base import is_usage_limit
 from console import config, db
 from tools import run_history
-from orchestrator import CHANGES_KEY, CODE_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS, run_from_stage, run_travel_planner
+from orchestrator import (CHANGES_KEY, CODE_STAGES, PAGE_REVIEW_KEY, STAGE_LABELS, STAGE_ORDER, STAGE_PROMPTS,
+                          LogisticsBlocked, run_from_stage, run_travel_planner)
 
 app = FastAPI(title="Travel planning console")
 
@@ -28,6 +31,14 @@ logger = logging.getLogger("travel-console")
 
 # trip_stages key (not a pipeline stage) holding where a failed run should resume.
 RESUME_KEY = "_resume"
+
+# A failed run is retried automatically, continuing from where it stopped
+# (finished stages and the page review progress are reused). Not for a usage
+# limit (429: it only fails again until the limit resets) or failures a retry
+# can't change (unresolvable logistics blockers, missing inputs).
+AUTO_RETRIES = 5
+AUTO_RETRY_DELAY_S = 60
+NOT_RETRIED = (LogisticsBlocked, ValueError, NotImplementedError)
 
 # In-memory per-trip event queues for SSE; trip_events table is the durable log.
 _queues: dict[str, asyncio.Queue] = {}
@@ -63,6 +74,7 @@ def _run_pipeline(
     cached_outputs: dict[str, str] | None = None,
     modification: str | None = None,
     change_notes: list[str] | None = None,
+    resume: bool = False,
 ):
     """Run (or resume, or modify) a trip's pipeline in the background.
 
@@ -70,7 +82,9 @@ def _run_pipeline(
     "requirements", no cache). A step rerun passes a later `stage_name`
     plus that trip's `cached_outputs` (see /trips/{id}/rerun-from/{stage}).
     A free-text modification passes stage_name="accommodation" plus
-    `modification` (see /trips/{id}/modify).
+    `modification` (see /trips/{id}/modify). `resume` continues a failed
+    run (see /trips/{id}/retry). A failure is retried automatically
+    (AUTO_RETRIES, from the resume point) unless it is a usage limit (429).
     """
     queue = _queues[trip_id]
     done_this_run: list[str] = []
@@ -115,11 +129,13 @@ def _run_pipeline(
         # this run finished. A modification not yet applied to the itinerary
         # is kept, so it's applied on retry instead of being lost.
         last = max((STAGE_ORDER.index(s) for s in done_this_run), default=None)
-        resume = stage_name if last is None else STAGE_ORDER[min(last + 1, len(STAGE_ORDER) - 1)]
+        point = stage_name if last is None else STAGE_ORDER[min(last + 1, len(STAGE_ORDER) - 1)]
         itinerary_done = "itinerary" in done_this_run
         request = modification or (change_notes[0] if change_notes else None)
+        if STAGE_ORDER.index(point) >= STAGE_ORDER.index("page") and db.get_stage_outputs(trip_id).get(PAGE_REVIEW_KEY):
+            point = "page"  # page made but its check/review unfinished: continue it, don't skip it
         db.save_stage_output(trip_id, RESUME_KEY, json.dumps({
-            "stage": "accommodation" if modification and not itinerary_done else resume,
+            "stage": "accommodation" if modification and not itinerary_done else point,
             "modification": modification if modification and not itinerary_done else None,
             # Already in the itinerary, but the page still has to show it.
             "note": request if request and (itinerary_done or not modification) else None,
@@ -150,17 +166,40 @@ def _run_pipeline(
                 cached_outputs = {**cached_outputs, CHANGES_KEY: json.dumps(legacy, ensure_ascii=False)}
                 db.save_stage_output(trip_id, CHANGES_KEY, cached_outputs[CHANGES_KEY])
                 log(f"Atkurta ankstesnių pataisymų: {len(legacy)} -- jie bus taikomi perleidžiant žingsnius.")
-        with providers.using_profile(profile_id):
-            url = run_from_stage(
-                stage_name,
-                cached_outputs=cached_outputs,
-                on_progress=log,
-                on_stage_complete=stage_complete,
-                on_llm_call=record_call,
-                modification=modification,
-                user_requirements=requirements_text,
-                change_notes=change_notes,
-            )
+        attempt = 0
+        while True:
+            done_this_run.clear()
+            try:
+                with providers.using_profile(profile_id):
+                    url = run_from_stage(
+                        stage_name,
+                        cached_outputs=cached_outputs,
+                        on_progress=log,
+                        on_stage_complete=stage_complete,
+                        on_llm_call=record_call,
+                        modification=modification,
+                        user_requirements=requirements_text,
+                        change_notes=change_notes,
+                        resume=resume,
+                    )
+                break
+            except Exception as e:  # noqa: BLE001 - decide below whether to retry
+                remember_resume_point()
+                if is_usage_limit(e):
+                    log("Pasiektas Claude naudojimo limitas -- automatiškai nekartojama. Po limito atsinaujinimo "
+                        "spausk „Bandyti dar kartą“: jau atlikti žingsniai bus perpanaudoti.", level="error")
+                    raise
+                if isinstance(e, NOT_RETRIED) or attempt >= AUTO_RETRIES:
+                    raise
+                attempt += 1
+                log(f"Nepavyko: {e}", level="error")
+                log(f"Automatinis pakartojimas {attempt}/{AUTO_RETRIES} po {AUTO_RETRY_DELAY_S} s "
+                    "(jau atlikti žingsniai perpanaudojami)...")
+                time.sleep(AUTO_RETRY_DELAY_S)
+                cached_outputs = db.get_stage_outputs(trip_id)
+                stage_name, modification, change_notes = _resume_point(trip_id, cached_outputs)
+                resume = True
+                log(f"Tęsiama nuo žingsnio: {STAGE_LABELS.get(stage_name, stage_name)}")
         db.save_stage_output(trip_id, RESUME_KEY, "")
         db.set_status(trip_id, "done", page_url=url)
         log(f"Puslapis paskelbtas: {url}")
@@ -223,6 +262,16 @@ def _legacy_resume_point(trip_id: str, cached: dict) -> tuple[str, str | None]:
     return next((s for s in STAGE_ORDER if s not in cached), "forecast"), None
 
 
+def _resume_point(trip_id: str, cached: dict) -> tuple[str, str | None, list[str] | None]:
+    """(stage, modification, change_notes) to continue a failed run with."""
+    resume = json.loads(cached.get(RESUME_KEY) or "null") or {}
+    stage, modification = resume.get("stage"), resume.get("modification")
+    if stage not in STAGE_ORDER:
+        stage, modification = _legacy_resume_point(trip_id, cached)
+    note = resume.get("note")
+    return stage, modification, [note] if note else None
+
+
 @app.post("/trips/{trip_id}/retry")
 def retry_trip(trip_id: str, background_tasks: BackgroundTasks):
     """Continue the same trip from where it failed, reusing finished stages
@@ -234,15 +283,11 @@ def retry_trip(trip_id: str, background_tasks: BackgroundTasks):
     if trip["status"] in ("running", "queued"):
         raise HTTPException(409, "Trip is already running")
     cached = db.get_stage_outputs(trip_id)
-    resume = json.loads(cached.get(RESUME_KEY) or "null") or {}
-    stage, modification = resume.get("stage"), resume.get("modification")
-    if stage not in STAGE_ORDER:
-        stage, modification = _legacy_resume_point(trip_id, cached)
+    stage, modification, change_notes = _resume_point(trip_id, cached)
     db.set_status(trip_id, "queued")
     _queues[trip_id] = asyncio.Queue()
-    note = resume.get("note")
     background_tasks.add_task(_run_pipeline, trip_id, trip["requirements_text"], stage,
-                              cached, modification, [note] if note else None)
+                              cached, modification, change_notes, True)
     return {"trip_id": trip_id, "stage": stage}
 
 
